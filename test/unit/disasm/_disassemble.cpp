@@ -14,7 +14,7 @@
 TEST_CASE("Disassemble Instructions", "[disasm][ins]") {
     Instruction *ins = nullptr;
 
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 
     // add #0, %eax
     std::vector<uint8_t> bytes = {0x83, 0xc0, 0x00};

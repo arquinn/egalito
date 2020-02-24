@@ -20,7 +20,7 @@ public:
     virtual void visit(IsolatedInstruction *isolated);
     virtual void visit(LinkedInstruction *linked);
     virtual void visit(ControlFlowInstruction *controlFlow);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *controlFlow);
 #endif
     virtual void visit(StackFrameInstruction *stackFrame);
@@ -37,7 +37,7 @@ public:
     virtual void visit(IsolatedInstruction *isolated);
     virtual void visit(LinkedInstruction *linked);
     virtual void visit(ControlFlowInstruction *controlFlow);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *controlFlow);
 #endif
     virtual void visit(StackFrameInstruction *stackFrame);
@@ -53,7 +53,7 @@ public:
     virtual void visit(IsolatedInstruction *isolated);
     virtual void visit(LinkedInstruction *linked);
     virtual void visit(ControlFlowInstruction *controlFlow);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *controlFlow);
 #endif
     virtual void visit(StackFrameInstruction *stackFrame);

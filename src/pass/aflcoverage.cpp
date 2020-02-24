@@ -24,7 +24,7 @@ void AFLCoveragePass::visit(Program *program) {
             X86_INS_CALL, call, "\xe8", "call", 4);
         callSem->setLink(new NormalLink(allocateFunc, Link::SCOPE_EXTERNAL_JUMP));
         call->setSemantic(callSem);
-        
+
         {
             auto sourceFunc = ChunkFind2(program).findFunction(
                 "__libc_start_main");

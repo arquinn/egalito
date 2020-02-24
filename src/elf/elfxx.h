@@ -3,7 +3,7 @@
 
 #include <elf.h>
 
-#ifdef ARCH_ARM
+#if defined(ARCH_ARM) || defined(ARCH_I686)
     // integral types
     typedef Elf32_Addr  ElfXX_Addr;
     typedef Elf32_Half  ElfXX_Half;

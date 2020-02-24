@@ -18,9 +18,9 @@ public:
     virtual void visit(IsolatedInstruction *isolated) = 0;
     virtual void visit(LinkedInstruction *linked) = 0;
     virtual void visit(ControlFlowInstruction *controlFlow) = 0;
-    #ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *dataLinked) = 0;
-    #endif
+#endif
     virtual void visit(ReturnInstruction *retInstr);
     virtual void visit(IndirectJumpInstruction *indirect);
     virtual void visit(IndirectCallInstruction *indirect);

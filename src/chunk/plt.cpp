@@ -235,6 +235,9 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
 #ifdef ARCH_X86_64
     #define R_JUMP_SLOT R_X86_64_JUMP_SLOT
     #define R_IRELATIVE R_X86_64_IRELATIVE
+#elif defined(ARCH_I686)
+#define R_JUMP_SLOT 7 //R_386_JUMP_SLOT
+    #define R_IRELATIVE R_386_IRELATIVE
 #elif defined(ARCH_AARCH64)
     #define R_JUMP_SLOT R_AARCH64_JUMP_SLOT
     #define R_IRELATIVE R_AARCH64_IRELATIVE
@@ -335,6 +338,83 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
             }
         }
     }
+#elif defined(ARCH_I686)
+    static const size_t ENTRY_SIZE = 16;
+
+    /* example format
+        0000000000000550 <.plt>:
+         550:   ff 35 b2 0a 20 00       pushq  0x200ab2(%rip)
+         556:   ff 25 b4 0a 20 00       jmpq   *0x200ab4(%rip)
+         55c:   0f 1f 40 00             nopl   0x0(%rax)
+
+        0000000000000560 <puts@plt>:
+         560:   ff 25 b2 0a 20 00       jmpq   *0x200ab2(%rip)
+         566:   68 00 00 00 00          pushq  $0x0
+         56b:   e9 e0 ff ff ff          jmpq   550 <.plt>
+    */
+
+    // note: we skip the first PLT entry, which has a different format
+    for(size_t i = 1 * ENTRY_SIZE; i < header->sh_size; i += ENTRY_SIZE) {
+        auto entry = section + i;
+
+        LOG(1, "CONSIDER PLT entry at " << entry);
+
+        if(*reinterpret_cast<const unsigned short *>(entry) == 0x25ff) {
+            address_t pltAddress = header->sh_addr + i;
+            address_t value = *reinterpret_cast<const unsigned int *>(entry + 2)
+                + (pltAddress + 2+4);  // target is RIP-relative
+            LOG(1, "PLT value would be " << value);
+            Reloc *r = registry->find(value);
+            if(r) {
+                auto symbol = r->getSymbol();
+                if(!symbol) {
+                    symbol = module->getElfSpace()->getSymbolList()
+                        ->find(r->getAddend());
+                }
+                auto externalSymbol = ExternalSymbolFactory(module)
+                    .makeExternalSymbol(symbol);
+                auto trampoline = new PLTTrampoline(
+                    pltList, pltAddress, externalSymbol, value);
+
+                static DisasmHandle handle(true);
+                auto jmp1 = new Instruction();
+                auto jmp1sem = new DataLinkedControlFlowInstruction(X86_INS_JMP, jmp1,
+                    "\xff\x25", "jmpq", 4);
+                jmp1->setSemantic(jmp1sem);
+                /// data link null???
+                jmp1sem->setLink(module->getDataRegionList()
+                    ->createDataLink(value, module, true));
+                LOG(1, "Trying to create link to 0x" << value << ", got "
+                        << jmp1sem->getLink());
+                //jmp1->setPosition(new AbsolutePosition(0x0));
+                //jmp1sem->regenerateAssembly();
+                auto push = DisassembleInstruction(handle, true)
+                    .instruction(std::string(
+                    reinterpret_cast<const char *>(entry + 6), 5));
+                auto jmp2 = new Instruction();
+                auto jmp2sem = new ControlFlowInstruction(X86_INS_JMP, jmp2,
+                    "\xe9", "jmpq", 4);
+                jmp2->setSemantic(jmp2sem);
+
+                auto sectionAddr = pltSection->getVirtualAddress();
+                jmp2sem->setLink(new UnresolvedLink(sectionAddr));
+                LOG(1, "plt section address is " << std::hex << sectionAddr);
+                LOG(1, "plt section link is " << std::hex << jmp2sem->getLink());
+
+                auto block = new Block();
+                ChunkMutator(trampoline).append(block);
+                {
+                    ChunkMutator m(block, true);
+                    m.append(jmp1);
+                    m.append(push);
+                    m.append(jmp2);
+                }
+
+                pltList->getChildren()->add(trampoline);
+            }
+        }
+    }
+
 #elif defined(ARCH_AARCH64)
     static const size_t ENTRY_SIZE = 16;
 

@@ -1,5 +1,7 @@
 #ifdef ARCH_X86_64
     #include "instr/linked-x86_64.h"
+#elif defined(ARCH_I686)
+    #include "instr/linked-i686.h"
 #elif defined(ARCH_AARCH64)
     #include "instr/linked-aarch64.h"
 #elif defined(ARCH_RISCV)

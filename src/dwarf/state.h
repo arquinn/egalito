@@ -19,6 +19,8 @@ class DwarfState {
 private:
 #ifdef ARCH_X86_64
     static const int NUM_REGISTERS = 17;
+#elif defined(ARCH_I686)
+    static const int NUM_REGISTERS = 9;
 #elif defined(ARCH_AARCH64)
     static const int NUM_REGISTERS = 32;
 #elif defined(ARCH_RISCV)

@@ -4,7 +4,7 @@
 #include <cstdint>  // for uint64_t
 #include <cstddef>  // for size_t
 
-#ifdef ARCH_ARM
+#if defined(ARCH_ARM) || defined(ARCH_I686)
 typedef uint32_t address_t;
 typedef int32_t diff_t;
 #else

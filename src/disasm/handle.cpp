@@ -11,6 +11,10 @@ DisasmHandle::DisasmHandle(bool detailed) {
         if(cs_open(CS_ARCH_X86, CS_MODE_64, h) != CS_ERR_OK) {
             throw "Can't initialize capstone handle!";
         }
+#elif defined(ARCH_I686)
+        if(cs_open(CS_ARCH_X86, CS_MODE_32, h) != CS_ERR_OK) {
+            throw "Can't initialize capstone handle!";
+        }
 #elif defined(ARCH_AARCH64)
         if(cs_open(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, h) != CS_ERR_OK) {
             throw "Can't initialize capstone handle!";

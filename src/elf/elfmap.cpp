@@ -82,6 +82,7 @@ void ElfMap::verifyElf() {
     // check architecture type
     unsigned char type = e_ident[EI_CLASS];
     if(type != ELFCLASSXX) {
+        CLOG(1, "type is %d, expected %d", type, ELFCLASSXX);
         throw "file is unsupported\n";
     }
 }

@@ -188,7 +188,7 @@ std::vector<Module *> ConductorSetup::addExtraLibraries(
     const std::vector<std::string> &filenames) {
 
     std::map<std::string, Module *> pathMap;
-    unsigned long maxAddress = 0;
+    address_t maxAddress = 0;
     for(auto module : CIter::modules(conductor->getProgram())) {
         maxAddress = std::max(maxAddress, module->getBaseAddress());
 
@@ -226,7 +226,7 @@ std::vector<Module *> ConductorSetup::addExtraLibraries(
 }
 
 void ConductorSetup::ensureBaseAddresses() {
-    unsigned long maxAddress = 0;
+    address_t maxAddress = 0;
     for(auto module : CIter::modules(conductor->getProgram())) {
         maxAddress = std::max(maxAddress, module->getBaseAddress());
     }

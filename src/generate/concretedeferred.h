@@ -234,7 +234,7 @@ public:
     virtual void writeTo(std::ostream &stream);
 };
 
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 struct PLTCodeEntry {
     char data[16];
 

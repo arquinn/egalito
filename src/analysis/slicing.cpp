@@ -29,7 +29,7 @@ private:
     SearchState *state;
     Mode mode;
     TreeNode *memTree;
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     union arg1_t {
         x86_reg reg;
         const x86_op_mem *mem;
@@ -126,7 +126,7 @@ SearchState::~SearchState() {
 void SlicingInstructionState::determineMode(AssemblyPtr assembly) {
     mode = MODE_UNKNOWN;
     auto asmOps = assembly->getAsmOperands();
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     if(asmOps->getOpCount()== 2
         && asmOps->getOperands()[0].type == X86_OP_REG
         && asmOps->getOperands()[1].type == X86_OP_REG) {
@@ -244,6 +244,18 @@ bool SlicingInstructionState::convertRegisterSize(Register &reg) {
         {X86_REG_R13B, X86_REG_R13W, X86_REG_R13D, X86_REG_R13},
         {X86_REG_R14B, X86_REG_R14W, X86_REG_R14D, X86_REG_R14},
         {X86_REG_R15B, X86_REG_R15W, X86_REG_R15D, X86_REG_R15}
+    };
+#elif defined(ARCH_I686)
+    static const Register promotion[][3] = {
+        // ignoring AH etc for now
+        {X86_REG_AL, X86_REG_AX, X86_REG_EAX},
+        {X86_REG_BL, X86_REG_BX, X86_REG_EBX},
+        {X86_REG_CL, X86_REG_CX, X86_REG_ECX},
+        {X86_REG_DL, X86_REG_DX, X86_REG_EDX},
+        {X86_REG_SI, X86_REG_ESI},  // 0 == X86_REG_INVALID
+        {X86_REG_DI, X86_REG_EDI},
+        {X86_REG_BP, X86_REG_EBP},
+        {X86_REG_SP, X86_REG_EBP},
     };
 #elif defined(ARCH_AARCH64) || defined(ARCH_ARM)
     static const Register promotion[][2] = {
@@ -788,7 +800,7 @@ void SlicingSearch::debugPrintRegAccesses(Instruction *i) {
     auto asmOps = assembly->getAsmOperands();
     for(size_t p = 0; p < asmOps->getOpCount(); p ++) {
         auto op = &asmOps->getOperands()[p];  // cs_x86_op*, cs_arm64_op*
-#if defined(ARCH_X86_64) || defined(ARCH_ARM) || defined(ARCH_AARCH64)
+#if defined(ARCH_X86_64) || defined(ARCH_I686) || defined(ARCH_ARM) || defined(ARCH_AARCH64)
         if(static_cast<cs_op_type>(op->type) == CS_OP_REG) {
             LOG(11, "        explicit reg ref "
                 << u.printReg(op->reg));
@@ -846,7 +858,7 @@ void SlicingSearch::detectInstruction(SearchState *state, bool firstPass) {
 #endif
 
     auto assembly = state->getInstruction()->getSemantic()->getAssembly();
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     if(!assembly) {
 #elif defined(ARCH_AARCH64) || defined(ARCH_ARM)
     if(dynamic_cast<ControlFlowInstruction *>(
@@ -872,7 +884,7 @@ void SlicingSearch::detectInstruction(SearchState *state, bool firstPass) {
     auto mode = iState->getMode();
 
     switch(assembly->getId()) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     case X86_INS_ADD:
         if(mode == SlicingInstructionState::MODE_REG_REG) {
             if(firstPass) {
@@ -1334,7 +1346,7 @@ void SlicingSearch::detectJumpRegTrees(SearchState *state, bool firstPass) {
     auto semantic = state->getInstruction()->getSemantic();
     LOG(11, "@ " << std::hex << state->getInstruction()->getAddress());
     if(auto v = dynamic_cast<ControlFlowInstruction *>(semantic)) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         if(v->getMnemonic() != "jmp" && v->getMnemonic() != "callq") {
 #elif defined(ARCH_AARCH64) || defined(ARCH_ARM)
         if(v->getMnemonic() != "b" && v->getMnemonic() != "bl") {

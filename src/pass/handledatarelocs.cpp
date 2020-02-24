@@ -187,6 +187,89 @@ Link *HandleDataRelocsPass::resolveVariableLink(Reloc *reloc, Module *module) {
         }
         else LOG(0, "unknown 64_64 reloc!");
         return l;
+    }
+#elif defined(ARCH_I686)
+    if(reloc->getType() == R_386_NONE) {
+        return nullptr;
+    }
+    else if(reloc->getType() == R_386_RELATIVE) {
+        auto l =  PerfectLinkResolver().resolveInternally(reloc, module, weak);
+        LOG(0, "reloc relative at 0x" << std::hex << reloc->getAddress()
+            << ", link = " << std::hex << l);
+        return l;
+    }
+    else if(reloc->getType() == R_386_IRELATIVE) {
+        return PerfectLinkResolver().resolveInternally(reloc, module, weak);
+    }
+    else if(reloc->getType() == R_386_TLS_TPOFF32) {
+        auto tls = module->getDataRegionList()->getTLS();
+        if(symbol && symbol->getSectionIndex() == SHN_UNDEF) {
+            tls = nullptr;
+        }
+        return new TLSDataOffsetLink(
+            tls, reloc->getSymbol(), reloc->getAddend());
+    }
+    else if(reloc->getType() == R_386_TLS_DTPMOD32) {
+        LOG(0, "WARNING: skipping R_X86_64_DTPMOD64 ("
+            << std::hex << reloc->getAddress()
+            << ") in " << module->getName());
+        return nullptr;
+    }
+    else if(reloc->getType() == R_386_TLS_DTPOFF32) {
+        LOG(0, "WARNING: skipping R_X86_64_DTPOFF64 ("
+            << std::hex << reloc->getAddress()
+            << ") in " << module->getName());
+        return nullptr;
+    }
+    else if(reloc->getType() == R_386_COPY) {
+        // handled in finalizeDataVariable() below
+        return nullptr;
+    }
+    else if(reloc->getType() == R_386_GLOB_DAT) {
+        if(!internal) {
+            LOG(0, "processing R_X86_64_GLOB_DAT ("
+                << std::hex << reloc->getAddress()
+                << ") in " << module->getName());
+            auto l = PerfectLinkResolver().resolveExternally(
+                reloc->getSymbol(), conductor, module, weak, false, true);
+            if(!l) {
+                l = PerfectLinkResolver().resolveInternally(reloc, module, weak, false);
+            }
+            LOG(0, "link is " << l);
+            return l;
+        }
+        else {
+            LOG(0, "checking GLOB_DAT relocation ["
+                << reloc->getSymbol()->getName() << "] for internal link");
+            auto l = PerfectLinkResolver().resolveInternally(reloc, module, weak, false);
+            if(auto v = dynamic_cast<AbsoluteDataLink *>(l)) {
+                auto externalSymbol = ExternalSymbolFactory(module)
+                    .makeExternalSymbol(reloc->getSymbol());
+                auto newLink = new InternalAndExternalDataLink(externalSymbol, v);
+                delete v;
+                return newLink;
+            }
+            return nullptr;
+        }
+    }
+    else if(reloc->getType() == R_386_32) {
+        // want a non-relative lookup
+        auto l =  PerfectLinkResolver().resolveInternally(reloc, module, weak, false);
+        LOG(0, "reloc 64_64 at 0x" << std::hex << reloc->getAddress() 
+            << ", link = " << std::hex << l);
+        if(auto abs = dynamic_cast<AbsoluteDataLink *>(l)) {
+            LOG(0, "    absolute DOL: " << abs->getTargetAddress());
+        }
+        else if(auto rel = dynamic_cast<DataOffsetLink *>(l)) {
+            LOG(0, "    relative DOL: " << rel->getTargetAddress());
+        }
+        else if(!l) {
+            auto externalSymbol = ExternalSymbolFactory(module)
+                .makeExternalSymbol(reloc->getSymbol());
+            l = new ExternalSymbolLink(externalSymbol, reloc->getAddend());
+        }
+        else LOG(0, "unknown 64_64 reloc!");
+        return l;
         
     }
 #else

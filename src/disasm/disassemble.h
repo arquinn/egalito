@@ -94,6 +94,26 @@ public:
         IntervalTree &splitRanges);
 };
 
+
+class DisassembleI686Function : public DisassembleFunctionBase {
+public:
+    using DisassembleFunctionBase::DisassembleFunctionBase;
+
+    Function *function(Symbol *symbol, SymbolList *symbolList,
+        SymbolList *dynamicSymbolList);
+    Function *fuzzyFunction(const Range &range, ElfSection *section);
+    FunctionList *linearDisassembly(const char *sectionName,
+        DwarfUnwindInfo *dwarfInfo, SymbolList *dynamicSymbolList,
+        RelocList *relocList);
+private:
+    void firstDisassemblyPass(ElfSection *section,
+        IntervalTree &splitRanges, IntervalTree &functionPadding);
+public:
+    void disassembleCrtBeginFunctions(ElfSection *section, Range crtbegin,
+        IntervalTree &splitRanges);
+};
+
+
 class DisassembleAARCH64Function : public DisassembleFunctionBase {
 public:
     using DisassembleFunctionBase::DisassembleFunctionBase;
@@ -130,6 +150,8 @@ public:
 
 #ifdef ARCH_X86_64
 typedef DisassembleX86Function DisassembleFunction;
+#elif defined(ARCH_I686)
+typedef DisassembleI686Function DisassembleFunction;
 #elif defined(ARCH_AARCH64)
 typedef DisassembleAARCH64Function DisassembleFunction;
 #elif defined(ARCH_RISCV)

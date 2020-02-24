@@ -19,7 +19,7 @@
 #include "log/temp.h"
 
 void StackExtendPass::visit(Module *module) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     if(0) {}
 #elif defined(ARCH_AARCH64)
     if(extendSize >= 504) { // due to stp limitation

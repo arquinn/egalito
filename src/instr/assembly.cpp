@@ -83,7 +83,7 @@ Assembly::Assembly(const rv_instr &instr) : operands(instr) {
 }
 #endif
 
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 void AssemblyOperands::overrideCapstone(const cs_insn &insn) {
     if(insn.id == X86_INS_CMP) {
         // capstone in egalitoci
@@ -95,6 +95,7 @@ void AssemblyOperands::overrideCapstone(const cs_insn &insn) {
     }
 }
 #endif
+
 
 #ifdef ARCH_AARCH64
 void AssemblyOperands::overrideCapstone(const cs_insn &insn) {

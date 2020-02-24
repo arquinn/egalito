@@ -225,6 +225,8 @@ void InstrDumper::dumpLinkedBase(LinkedInstructionBase *semantic, bool isCF) {
         std::ostringstream name;
 #ifdef ARCH_X86_64
         if(semantic->getAssembly()->getMnemonic() == "callq") name << "(CALL)";
+#elif defined(ARCH_I686)
+        if(semantic->getAssembly()->getMnemonic() == "callq") name << "(CALL)";
 #elif defined(ARCH_AARCH64)
         if(semantic->getAssembly()->getMnemonic() == "bl") name << "(CALL)";
 #elif defined(ARCH_ARM)
@@ -240,7 +242,7 @@ void InstrDumper::dumpLinkedBase(LinkedInstructionBase *semantic, bool isCF) {
         std::string bytes = getBytes(semantic);
         std::string bytes2 = DisasmDump::formatBytes(bytes.c_str(), bytes.size());
         DisasmDump::printInstructionRaw(address,
-            pos, name.str().c_str(),
+                                        pos, name.str().c_str(),
             semantic->getAssembly()->getOpStr().c_str(), nullptr, bytes2.c_str(),
             false);
     }
@@ -261,7 +263,7 @@ void InstrDumper::visit(ControlFlowInstruction *semantic) {
     dumpControlFlow(semantic, false);
 }
 
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 void InstrDumper::visit(DataLinkedControlFlowInstruction *semantic) {
     dumpLinkedBase(semantic, true);
 }
@@ -290,6 +292,8 @@ void InstrDumper::dumpControlFlow(ControlFlowInstructionBase *semantic, bool pri
 
     std::ostringstream name;
 #ifdef ARCH_X86_64
+    if(semantic->getMnemonic() == "callq") name << "(CALL)";
+#elif defined(ARCH_I686)
     if(semantic->getMnemonic() == "callq") name << "(CALL)";
 #elif defined(ARCH_AARCH64)
     if(semantic->getMnemonic() == "bl") name << "(CALL)";

@@ -55,7 +55,7 @@ public:
         { write(TYPE_IsolatedInstruction, isolated); }
     virtual void visit(LinkedInstruction *linked);
     virtual void visit(ControlFlowInstruction *controlFlow);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *controlFlow);
 #endif
     virtual void visit(ReturnInstruction *retInstr)
@@ -84,22 +84,22 @@ void SemanticSerializer::visit(LinkedInstruction *linked) {
     write(TYPE_LinkedInstruction, linked);
     assert(linked->getLink());
     LinkSerializer(op).serialize(linked->getLink(), writer);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     writer.write<uint8_t>(linked->getIndex());
 #endif
 }
 
 void SemanticSerializer::visit(ControlFlowInstruction *controlFlow) {
     writer.write<uint8_t>(TYPE_ControlFlowInstruction);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     writer.write<uint32_t>(controlFlow->getId());
 #endif
     writer.writeID(op.assign(controlFlow->getSource()));
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     writer.writeBytes<uint8_t>(controlFlow->getOpcode());
 #endif
     writer.writeString(controlFlow->getMnemonic());
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     writer.write<uint8_t>(controlFlow->getDisplacementSize());
 #endif
     writer.write<bool>(controlFlow->returns());
@@ -108,7 +108,7 @@ void SemanticSerializer::visit(ControlFlowInstruction *controlFlow) {
     LinkSerializer(op).serialize(controlFlow->getLink(), writer);
 }
 
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 void SemanticSerializer::visit(DataLinkedControlFlowInstruction *controlFlow) {
     writer.write<uint8_t>(TYPE_DataLinkedControlFlowInstruction);
     assert(controlFlow->getLink());
@@ -202,7 +202,7 @@ InstructionSemantic *InstrSerializer::deserialize(Instruction *instruction,
         return defaultDeserialize(instruction, address, reader);
     }
     case TYPE_ControlFlowInstruction: {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         auto id = reader.read<uint32_t>();  // NOT a chunk ID
         auto source = op.lookupAs<Instruction>(reader.readID());
         auto opcode = reader.readBytes<uint8_t>();

@@ -59,7 +59,7 @@ void InstrWriterGetData::visit(ControlFlowInstruction *controlFlow) {
 }
 
 // DataLinkedControlFlow Instruction
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
 void InstrWriterCString::visit(DataLinkedControlFlowInstruction *controlFlow) {
     controlFlow->writeTo(target, true);
 }

@@ -120,6 +120,39 @@ Module *Disassemble::makeModuleFromSymbols(ElfMap *elfMap,
     }
 #endif
 
+#ifdef ARCH_I686
+    /* consider any space between start of .text and first function as
+        potential crt function locations */
+    LOG(1, "Reaching potential problem code. ");
+    auto text = elfMap->findSection(".text");
+    address_t smallest = -1u;
+    for(auto it : (*symbolList)) {
+        if(!it->isFunction()) continue;
+
+        if(it->getAddress() >= text->getVirtualAddress()) {
+            address_t gap = it->getAddress() - text->getVirtualAddress();
+            if(gap < smallest) smallest = gap;
+        }
+    }
+    if(smallest != -1u && smallest > 0) {
+        IntervalTree gaptree(Range(text->getVirtualAddress(), text->getSize()));
+        gaptree.add(Range(text->getVirtualAddress(), smallest));
+        DisasmHandle handle(true);
+        DisassembleX86Function dx86(handle, elfMap);
+        dx86.disassembleCrtBeginFunctions(text,
+            Range(text->getVirtualAddress(), smallest), gaptree);
+        for(auto &r : gaptree.getAllData()) {
+            Function *function = dx86.fuzzyFunction(r, text);
+            functionList->getChildren()->add(function);
+            function->setParent(functionList);
+            LOG(10, "adding function " << function->getName()
+                << " at " << std::hex << function->getAddress()
+                << " size " << function->getSize());
+        }
+    }
+#endif
+
+
     for(auto sym : *symbolList) {
         // skip Symbols that we don't think represent functions
         if(!sym->isFunction()) continue;
@@ -192,7 +225,7 @@ Function *Disassemble::function(ElfMap *elfMap, Symbol *symbol,
 
     DisasmHandle handle(true);
     DisassembleFunction disassembler(handle, elfMap);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     return disassembler.function(symbol, symbolList, dynamicSymbolList);
 #else
     return disassembler.function(symbol, symbolList);
@@ -752,6 +785,329 @@ FunctionList *DisassembleX86Function::linearDisassembly(const char *sectionName,
     return functionList;
 }
 
+// --- I686 dissassembly code
+
+Function *DisassembleI686Function::function(Symbol *symbol,
+    SymbolList *symbolList, SymbolList *dynamicSymbolList) {
+
+    auto sectionIndex = symbol->getSectionIndex();
+    auto section = elfMap->findSection(sectionIndex);
+
+    PositionFactory *positionFactory = PositionFactory::getInstance();
+    Function *function = new Function(symbol);
+
+    address_t symbolAddress = symbol->getAddress();
+    function->setPosition(
+        positionFactory->makeAbsolutePosition(symbolAddress));
+
+    if(dynamicSymbolList) {
+        if(auto dsym = dynamicSymbolList->find(symbolAddress)) {
+            function->setDynamicSymbol(dsym);
+        }
+    }
+
+    auto readAddress =
+        section->getReadAddress() + section->convertVAToOffset(symbolAddress);
+    auto readSize = symbol->getSize();
+    auto virtualAddress = symbol->getAddress();
+
+    auto context = ParseOverride::getInstance()->makeContext(
+        function->getSymbol()->getName());
+
+    if(auto over = ParseOverride::getInstance()->getBlockBoundaryOverride(
+        context)) {
+
+        LOG(10, "Using parsing override!");
+
+        disassembleCustomBlocks(function, readAddress, virtualAddress,
+            over->getOverrideList());
+
+    }
+    else {
+        disassembleBlocks(
+            function, readAddress, readSize, virtualAddress);
+    }
+
+    {
+        ChunkMutator m(function);  // recalculate cached values if necessary
+    }
+
+    return function;
+}
+
+Function *DisassembleI686Function::fuzzyFunction(const Range &range,
+    ElfSection *section) {
+
+    address_t virtualAddress = section->getVirtualAddress();
+    address_t readAddress = section->getReadAddress()
+        + section->convertVAToOffset(virtualAddress);
+    address_t intervalVirtualAddress = range.getStart();
+    address_t intervalOffset = intervalVirtualAddress - virtualAddress;
+    address_t intervalSize = range.getSize();
+
+    Function *function = new Function(intervalVirtualAddress);
+
+    PositionFactory *positionFactory = PositionFactory::getInstance();
+    function->setPosition(
+        positionFactory->makeAbsolutePosition(intervalVirtualAddress));
+
+    disassembleBlocks(function, readAddress + intervalOffset,
+        intervalSize, intervalVirtualAddress);
+
+    {
+        ChunkMutator m(function);  // recalculate cached values if necessary
+    }
+
+    return function;
+}
+
+void DisassembleI686Function::firstDisassemblyPass(ElfSection *section,
+    IntervalTree &splitRanges, IntervalTree &functionPadding) {
+
+    // Get address of region to disassemble
+    address_t virtualAddress = section->getVirtualAddress();
+    address_t readAddress = section->getReadAddress()
+        + section->convertVAToOffset(virtualAddress);
+    size_t readSize = section->getSize();
+
+    cs_insn *insn;
+    size_t count = cs_disasm(handle.raw(),
+        (const uint8_t *)readAddress, readSize, virtualAddress, 0, &insn);
+
+    size_t nopBytes = 0;
+    //enum { PROLOGUE_NONE, PROLOGUE_PUSH } prologueState = PROLOGUE_NONE;
+    for(size_t j = 0; j < count; j++) {
+        auto ins = &insn[j];
+
+        address_t target = 0;
+        if(shouldSplitFunctionDueTo(ins, &target)) {
+            splitRanges.splitAt(target);
+        }
+
+        if(ins->id == X86_INS_NOP) {
+            nopBytes += ins->size;
+        }
+        else if(nopBytes) {
+            functionPadding.add(Range(ins->address - nopBytes, nopBytes));
+            nopBytes = 0;
+        }
+
+#if 0
+        switch(prologueState) {
+        case PROLOGUE_NONE:
+            if(ins->id == X86_INS_PUSH && ins->detail->x86.op_count == 1
+                && ins->detail->x86.operands[0].type == X86_OP_REG
+                && ins->detail->x86.operands[0].reg == X86_REG_RBP) {
+
+                prologueState = PROLOGUE_PUSH;
+            }
+            break;
+        case PROLOGUE_PUSH:
+            if(ins->id == X86_INS_MOV && ins->detail->x86.op_count == 2
+                && ins->detail->x86.operands[0].type == X86_OP_REG
+                && ins->detail->x86.operands[1].type == X86_OP_REG
+                && ins->detail->x86.operands[0].reg == X86_REG_RSP
+                && ins->detail->x86.operands[1].reg == X86_REG_RBP) {
+
+                splitRanges.splitAt(ins->address - 1);  // back before push
+            }
+            prologueState = PROLOGUE_NONE;
+            break;
+        }
+#endif
+    }
+
+    if(nopBytes) {
+        functionPadding.add(Range(virtualAddress + readSize - nopBytes,
+            nopBytes));
+    }
+
+    if(count > 0) cs_free(insn, count);
+}
+
+// for deregister_tm_clones, register_tm_clones, __do_global_dtors_aux, and frame_dummy
+void DisassembleI686Function::disassembleCrtBeginFunctions(ElfSection *section,
+    Range crtbegin, IntervalTree &splitRanges) {
+
+    LOG(1, "range: " << std::hex << crtbegin.getStart() << " " << crtbegin.getSize());
+
+    cs_insn *insn;
+    size_t count = cs_disasm(handle.raw(),
+        (const uint8_t *)section->getReadAddress()
+            + section->convertVAToOffset(crtbegin.getStart()),
+        crtbegin.getSize(), crtbegin.getStart(), 0, &insn);
+
+    // We find the crtbegin functions by extrapolating from the ret statements
+    // that are followed by nops. Because these functions are very strange, the
+    // padding nops are not stripped from the functions (to match symbol info).
+    enum {
+        MODE_NONE,          // starting
+        MODE_RET,           // seen a ret
+        MODE_NOP,           // seen a ret and one or more nops
+        MODE_MAYBE_FOUND,   // almost done, but filter out ret+nop+ret
+        MODE_FOUND          // done, end the function!
+    } mode = MODE_NONE;
+
+    for(size_t j = 0; j < count; j++) {
+        auto ins = &insn[j];
+
+        bool redo;
+        do {
+            redo = false;
+            switch(mode) {
+            case MODE_NONE:
+                if(ins->id == X86_INS_RET) mode = MODE_RET;
+                break;
+            case MODE_RET:
+                if(ins->id == X86_INS_NOP) mode = MODE_NOP;
+                else mode = MODE_NONE, redo = true;
+                break;
+            case MODE_NOP:
+                if(ins->id == X86_INS_NOP) mode = MODE_NOP;
+                else mode = MODE_MAYBE_FOUND, redo = true;
+                break;
+            case MODE_MAYBE_FOUND:
+                // if we see ret+nop+ret sequence, wait until second ret
+                if(ins->id == X86_INS_RET) mode = MODE_RET;
+                else mode = MODE_FOUND, redo = true;
+                break;
+            case MODE_FOUND:
+                LOG(1, "splitting crtbegin function at 0x"
+                    << std::hex << ins->address);
+                splitRanges.splitAt(ins->address);
+                mode = MODE_NONE, redo = true;
+                break;
+            }
+        } while(redo);
+    }
+
+    if(count > 0) cs_free(insn, count);
+}
+
+FunctionList *DisassembleI686Function::linearDisassembly(const char *sectionName,
+    DwarfUnwindInfo *dwarfInfo, SymbolList *dynamicSymbolList,
+    RelocList *relocList) {
+
+    auto section = elfMap->findSection(sectionName);
+    if(!section) return nullptr;
+
+    Range sectionRange(section->getVirtualAddress(), section->getSize());
+
+    // Find known functions from DWARF info
+    IntervalTree knownFunctions(sectionRange);
+    for(auto it = dwarfInfo->fdeBegin(); it != dwarfInfo->fdeEnd(); it ++) {
+        DwarfFDE *fde = *it;
+        Range range(fde->getPcBegin(), fde->getPcRange());
+        if(knownFunctions.add(range)) {
+            LOG(12, "DWARF FDE at [" << std::hex << fde->getPcBegin() << ",+"
+                << fde->getPcRange() << "]");
+        }
+        else {
+            LOG(1, "FDE is out of bounds of .text section, skipping");
+        }
+    }
+
+    // Run first disassembly pass, to find obvious function boundaries
+    IntervalTree splitRanges(sectionRange);
+    splitRanges.add(sectionRange);
+    splitRanges.splitAt(elfMap->getEntryPoint());
+    if(auto s = elfMap->findSection(".init_array")) {
+        for(size_t i = 0; i < s->getSize(); i ++) {
+            splitRanges.splitAt(*reinterpret_cast<address_t *>(s->getReadAddress() + i));
+        }
+    }
+    if(auto s = elfMap->findSection(".fini_array")) {
+        for(size_t i = 0; i < s->getSize(); i ++) {
+            splitRanges.splitAt(*reinterpret_cast<address_t *>(s->getReadAddress() + i));
+        }
+    }
+
+    IntervalTree functionPadding(sectionRange);
+    firstDisassemblyPass(section, splitRanges, functionPadding);
+
+    // Shrink functions, removing nop padding bytes
+    IntervalTree functionsWithoutPadding(sectionRange);
+    splitRanges.getRoot()->inStartOrderTraversal([&] (Range func) {
+        Range bound;
+        if(functionPadding.findLowerBoundOrOverlapping(func.getEnd(), &bound)) {
+            LOG(10, "looks like function " << func << " may have some padding");
+            if(func.getEnd() == bound.getEnd() || bound.contains(func.getEnd())) {
+                functionsWithoutPadding.add(Range::fromEndpoints(
+                    func.getStart(), bound.getStart()));
+            }
+            else {
+                functionsWithoutPadding.add(func);
+            }
+        }
+    });
+
+    // Remove nop padding byte ranges after all known functions
+    // (achieved by removing all functions plus nops, then adding back in)
+    knownFunctions.getRoot()->inStartOrderTraversal([&] (Range func) {
+        Range bound;
+        if(functionPadding.findLowerBoundOrOverlapping(func.getEnd(), &bound)) {
+            LOG(10, "looks like function " << func << " may have some padding");
+            if(func.getEnd() == bound.getEnd() || bound.contains(func.getEnd())) {
+                // Subtracts func, and if any single range would be subtracted,
+                // we also subtract the nop padding from that range. This
+                // avoids enroaching into functions that begin with a nop.
+                functionsWithoutPadding.subtractWithAddendum(func, bound);
+            }
+            else {
+                functionsWithoutPadding.subtract(func);
+            }
+        }
+        else {
+            // No nop padding bytes, just subtract function
+            functionsWithoutPadding.subtract(func);
+        }
+    });
+    functionsWithoutPadding.unionWith(knownFunctions);  // add back in
+
+    // Hack to find the crtbegin functions...
+    auto entryPoint = elfMap->getEntryPoint();
+    Range crtBeginFunction;  // blob of all crtbegin functions
+    if(functionsWithoutPadding.findUpperBound(
+        entryPoint, &crtBeginFunction)) {
+
+        disassembleCrtBeginFunctions(section, crtBeginFunction,
+            functionsWithoutPadding);
+    }
+
+    // Get final list of functions (add special functions outside .text)
+    std::vector<Range> intervalList = functionsWithoutPadding.getAllData();
+    if(auto s = elfMap->findSection(".init")) {
+        intervalList.push_back(Range(s->getVirtualAddress(), s->getSize()));
+    }
+    if(auto s = elfMap->findSection(".fini")) {
+        intervalList.push_back(Range(s->getVirtualAddress(), s->getSize()));
+    }
+
+    LOG(1, "Splitting code section into " << intervalList.size()
+        << " fuzzy functions");
+
+    FunctionList *functionList = new FunctionList();
+    for(const Range &range : intervalList) {
+        LOG(11, "Split into function " << range << " at section offset "
+            << section->convertVAToOffset(range.getStart()));
+        Function *function = fuzzyFunction(range, section);
+
+        if(auto dsym = dynamicSymbolList->find(range.getStart())) {
+            LOG(12, "    renaming fuzzy function [" << function->getName()
+                << "] to [" << dsym->getName() << "]");
+            function->setName(dsym->getName());
+            function->setDynamicSymbol(dsym);
+        }
+
+        functionList->getChildren()->add(function);
+        function->setParent(functionList);
+    }
+
+    return functionList;
+}
+
+
+
 // --- AARCH64 disassembly code
 
 // We do not handle binaries that contain embedded literals in code without
@@ -1040,13 +1396,15 @@ void DisassembleAARCH64Function::splitByDynamicSymbols(
 
 void DisassembleAARCH64Function::splitByRelocations(
     RelocList *relocList, IntervalTree &splitRanges) {
-
+#ifndef ARCH_I686
     if(!relocList) return;
     for(auto r : *relocList) {
-        if(r->getType() == R_AARCH64_RELATIVE) {
+
+      if(r->getType() == R_AARCH64_RELATIVE) {
             splitRanges.splitAt(r->getAddend());
         }
     }
+#endif
 }
 
 Function *DisassembleAARCH64Function::fuzzyFunction(const Range &range,
@@ -1368,6 +1726,15 @@ void DisassembleFunctionBase::disassembleCustomBlocks(Function *function,
                     false, function->getAddress() + function->getSize() + i);
                 ChunkMutator(gapBlock, false).append(instr);
             }
+#elif defined(ARCH_I686)
+            LOG(1, "potentially problem code 2");
+            for(size_t i = 0; i < gap; i ++) {
+                // HLT instruction byte
+                auto instr = Disassemble::instruction({0xf4},
+                    false, function->getAddress() + function->getSize() + i);
+                ChunkMutator(gapBlock, false).append(instr);
+            }
+
 #elif defined(ARCH_AARCH64)
             if((gap % 4) != 0) {
                 LOG(1, "gap block size not multiple of 4!");
@@ -1542,6 +1909,17 @@ bool DisassembleFunctionBase::shouldSplitBlockAt(cs_insn *ins) {
     else if(cs_insn_group(handle.raw(), ins, X86_GRP_RET)) {
         split = true;
     }
+#elif defined(ARCH_I686)
+    LOG(1, "potential problem code 3");
+    if(cs_insn_group(handle.raw(), ins, X86_GRP_JUMP)) {
+        split = true;
+    }
+    else if(cs_insn_group(handle.raw(), ins, X86_GRP_CALL)) {
+        split = true;
+    }
+    else if(cs_insn_group(handle.raw(), ins, X86_GRP_RET)) {
+        split = true;
+    }
 #elif defined(ARCH_AARCH64)
     if(cs_insn_group(handle.raw(), ins, ARM64_GRP_JUMP)) {  // only branches
         split = true;
@@ -1602,6 +1980,16 @@ bool DisassembleFunctionBase::shouldSplitFunctionDueTo(cs_insn *ins,
     address_t *target) {
 
 #ifdef ARCH_X86_64
+    if(cs_insn_group(handle.raw(), ins, X86_GRP_CALL)) {
+        cs_x86 *x = &ins->detail->x86;
+        cs_x86_op *op = &x->operands[0];
+        if(x->op_count > 0 && op->type == X86_OP_IMM) {
+            *target = op->imm;
+            return true;
+        }
+    }
+#elif defined(ARCH_I686)
+    LOG(1, "potentially issue number 4?");
     if(cs_insn_group(handle.raw(), ins, X86_GRP_CALL)) {
         cs_x86 *x = &ins->detail->x86;
         cs_x86_op *op = &x->operands[0];

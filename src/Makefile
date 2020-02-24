@@ -30,6 +30,8 @@ CMINUS_SOURCES      = $(wildcard cminus/*.c)
 SNIPPET_SOURCES     = $(wildcard snippet/*.c snippet/*.cpp)
 ifeq (aarch64,$(P_ARCH))
 	SNIPPET_SOURCES += snippet/start2-aarch64.S snippet/hook-aarch64.S
+else ifeq (i686,$(P_ARCH))
+	SNIPPET_SOURCES += snippet/start2-i686.S snippet/ifunc-i686.S snippet/hook-i686.S
 else ifeq (x86_64,$(P_ARCH))
 	SNIPPET_SOURCES += snippet/start2-x86_64.S snippet/ifunc-x86_64.S \
 		snippet/hook-x86_64.S
@@ -84,6 +86,7 @@ GEN_TIMESTAMP = $(BUILDDIR).gen_timestamp
 # Default target
 .PHONY: all
 all: $(GEN_TIMESTAMP) $(OUTPUTS) .symlinks
+	@echo $(SNIPPET_SOURCES)
 	@true
 
 release: GENERIC_FLAGS += -DRELEASE_BUILD -DNDEBUG -Wno-unused-but-set-variable -Wno-unused-variable -Wno-empty-body

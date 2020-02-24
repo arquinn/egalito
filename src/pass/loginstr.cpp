@@ -30,6 +30,8 @@ extern "C"
 void egalito_log_instruction(unsigned long address) {
 #ifdef ARCH_X86_64
     #define DISTANCE_FROM_ENTRY     11 // 5 for call instruction, 1 for pushfd, 5 for lea 0x80(%esp), %esp
+#elif ARCH_I686
+    #define DISTANCE_FROM_ENTRY     11 // 5 for call instruction, 1 for pushfd, 5 for lea 0x80(%esp), %esp
 #elif defined(ARCH_AARCH64)
     #define DISTANCE_FROM_ENTRY     12
 #elif defined(ARCH_RISCV)

@@ -23,6 +23,16 @@ void egalito_allocate_shadow_stack_gs(void) {
 
     //arch_prctl(ARCH_SET_GS, memory);
     // #define ARCH_SET_GS           0x1001
+
+#ifdef ARCH_I668
+    __asm__ __volatile__ (
+        "mov $0x1001, %%ebx\n"
+        "mov %0, %%ecx\n"
+        "mov $158, %%rax\n"  // arch_prctl
+        "int $80\n"
+        : : "r"(memory)
+    );
+#else
     __asm__ __volatile__ (
         "mov $0x1001, %%rdi\n"
         "mov %0, %%rsi\n"
@@ -30,6 +40,7 @@ void egalito_allocate_shadow_stack_gs(void) {
         "syscall\n"
         : : "r"(memory)
     );
+#endif
 }
 
 unsigned long get_gs(void) {

@@ -43,7 +43,7 @@ bool DwarfUnwindInfo::findCIE(address_t address, uint64_t *index) {
     return false;
 }
 
-DwarfCIE *DwarfUnwindInfo::getCIE(uint64_t cieIndex) {
+DwarfCIE *DwarfUnwindInfo::getCIE(size_t cieIndex) {
     assert(cieIndex < cieList.size());
     return cieList[cieIndex];
 }

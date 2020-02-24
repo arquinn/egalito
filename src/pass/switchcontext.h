@@ -18,6 +18,17 @@
 // Save same as above, but not RAX
 #define RET_RAX_CONTEXT_SIZE            (8*8)
 #define RET_RAX_REGISTER_SAVE_LIST      {11, 10, 9, 8, 7, 6, 2, 1}
+
+#elif defined(ARCH_I686)
+// Save EDX, ECX, EAX
+// R12 is saved just for keeping the stack alignment
+#define EGALITO_CONTEXT_SIZE    (4*3)
+#define REGISTER_SAVE_LIST      {2, 1, 0}
+
+// Save same as above, but not RAX
+#define RET_RAX_CONTEXT_SIZE            (4*2)
+#define RET_RAX_REGISTER_SAVE_LIST      {2, 1}
+
 #elif defined(ARCH_AARCH64)
 // For AARCH64, this means all non-callee-saved registers, except for
 // X29 and X30 which will be saved by InstrumentCalls pass.

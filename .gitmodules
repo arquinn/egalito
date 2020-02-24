@@ -13,3 +13,6 @@
 [submodule "dep/keystone"]
 	path = dep/keystone
 	url = git@github.com:keystone-engine/keystone.git
+[submodule "dep/args"]
+	path = dep/args
+	url = https://github.com/Taywee/args

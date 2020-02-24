@@ -65,6 +65,8 @@ void AnyGen::makeHeader() {
     header->e_type = ET_EXEC;
 #ifdef ARCH_X86_64
     header->e_machine = EM_X86_64;
+#elif defined(ARCH_I686)
+    header->e_machine = EM_386; // I think? 
 #else
     header->e_machine = EM_AARCH64;
 #endif

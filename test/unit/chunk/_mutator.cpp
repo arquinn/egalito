@@ -13,7 +13,7 @@
 #include "log/registry.h"
 
 static Instruction *makeWithImmediate(unsigned char imm) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     // add imm, %eax
     std::vector<unsigned char> bytes = {0x83, 0xc0, imm};
 #elif defined(ARCH_AARCH64) || defined(ARCH_ARM)
@@ -46,7 +46,7 @@ static void ensureValues(Block *block, const std::vector<unsigned char> &values)
 
         InstrWriterGetData writer;
         ins->getSemantic()->accept(&writer);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         CHECK(writer.get()[2] == values[index]);
 #elif defined(ARCH_AARCH64)
         unsigned char imm = ((writer.get()[1] >> 2) | (writer.get()[2] << 6))

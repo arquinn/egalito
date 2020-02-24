@@ -43,11 +43,11 @@ private:
     class SaveRestoreRegisters {
     private:
         Instruction *point;
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         bool redzone;
 #endif
     public:
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         SaveRestoreRegisters(Instruction *point, bool redzone)
             : point(point), redzone(redzone) {}
 #else

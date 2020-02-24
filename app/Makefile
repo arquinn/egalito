@@ -17,7 +17,7 @@ ELF_SOURCES             = $(wildcard elf/*.cpp)
 SANDBOX_SOURCES         = $(wildcard sandbox/*.c sandbox/*.cpp)
 SANDBOX_INJECT_SOURCES  = $(wildcard sandbox/inject/*.c sandbox/inject/*.cpp)
 COVERAGE_SOURCES        = $(wildcard coverage/*.c coverage/*.cpp)
-COVERAGE_INJECT_SOURCES = $(wildcard coverage/inject/*.c coverage/inject/*.s)
+COVERAGE_INJECT_SOURCES = $(wildcard coverage/inject/*.c) #coverage/inject/*.s)
 HARDEN_SOURCES          = $(wildcard harden/*.cpp)
 CET_INJECT_SOURCES      = $(wildcard cet/inject/*.c cet/inject/*.cpp)
 SHELL_SOURCES           = $(wildcard shell/*.cpp)
@@ -27,6 +27,7 @@ ORDER_SOURCES           = $(wildcard order/*.cpp)
 PROFILE_SOURCES         = $(wildcard profile/*.cpp)
 PYTHON_SOURCES          = $(wildcard python/*.cpp)
 TWOCODE_SOURCES         = $(wildcard twocode/*.cpp)
+STEAMDRILL_SOURCES      = $(wildcard steamdrill/*.cpp)
 
 exe-filename = $(foreach s,$1,$(BUILDDIR)$(dir $s)$(basename $(notdir $s)))
 obj-filename = $(foreach s,$1,$(BUILDDIR)$(dir $s)$(basename $(notdir $s)).o)
@@ -48,8 +49,8 @@ LIBSANDBOX_SOURCES = $(SANDBOX_INJECT_SOURCES)
 LIBSANDBOX_OBJECTS = $(call obj-filename,$(LIBSANDBOX_SOURCES))
 LIBCOVERAGE_SOURCES = $(COVERAGE_INJECT_SOURCES)
 LIBCOVERAGE_OBJECTS = $(call obj-filename,$(LIBCOVERAGE_SOURCES))
-LIBCET_SOURCES = $(CET_INJECT_SOURCES)
-LIBCET_OBJECTS = $(call obj-filename,$(LIBCET_SOURCES))
+#LIBCET_SOURCES = $(CET_INJECT_SOURCES)
+#LIBCET_OBJECTS = $(call obj-filename,$(LIBCET_SOURCES))
 ETELF_SOURCES = $(ELF_SOURCES)
 ETELF_OBJECTS = $(call obj-filename,$(ETELF_SOURCES))
 ETPROFILE_SOURCES = $(PROFILE_SOURCES)
@@ -59,11 +60,14 @@ ETTWOCODE_OBJECTS = $(call obj-filename,$(ETTWOCODE_SOURCES))
 ETORDER_SOURCES = $(ORDER_SOURCES)
 ETORDER_OBJECTS = $(call obj-filename,$(ETORDER_SOURCES))
 
+STEAMDRILL_INST_SOURCES = $(STEAMDRILL_SOURCES)
+STEAMDRILL_INST_OBJECTS = $(call obj-filename,$(STEAMDRILL_INST_SOURCES))
+
 ALL_SOURCES = $(sort $(ETSHELL_SOURCES) $(ETSHELL2_SOURCES) $(ETOBJDUMP_SOURCES) \
     $(ETSANDBOX_SOURCES) $(LIBSANDBOX_SOURCES) \
     $(ETCOVERAGE_SOURCES) $(LIBCOVERAGE_SOURCES) \
     $(ETHARDEN_SOURCES) $(LIBCET_SOURCES) \
-    $(ETELF_SOURCES) $(ETPROFILE_SOURCES) $(ETTWOCODE_SOURCES) $(ETORDER_SOURCES))
+    $(ETELF_SOURCES) $(ETPROFILE_SOURCES) $(ETTWOCODE_SOURCES) $(ETORDER_SOURCES)) $(STEAMDRILL_INST_SOURCES)
 ALL_OBJECTS = $(call obj-filename,$(ALL_SOURCES))
 
 PYTHON_OBJECTS = $(call obj-filename,$(PYTHON_SOURCES))
@@ -86,7 +90,10 @@ SANDBOX_LIBRARY = $(BUILDDIR)libsandbox.so
 COVERAGE_LIBRARY = $(BUILDDIR)libcoverage.so
 CET_LIBRARY = $(BUILDDIR)libcet.so
 
-OUTPUTS = $(ETSHELL) $(ETSHELL2) $(ETOBJDUMP) $(ETSANDBOX) $(SANDBOX_LIBRARY) $(ETCOVERAGE) $(COVERAGE_LIBRARY) $(ETHARDEN) $(CET_LIBRARY) $(ETELF) $(ETPROFILE) $(ETTWOCODE) $(ETORDER)
+STEAMDRILL_INST = $(BUILDDIR)steamdrillInst
+
+#OUTPUTS = $(ETSHELL) $(ETSHELL2) $(ETOBJDUMP) $(ETSANDBOX) $(SANDBOX_LIBRARY) $(ETCOVERAGE) $(COVERAGE_LIBRARY) $(ETHARDEN) $(CET_LIBRARY) $(ETELF) $(ETPROFILE) $(ETTWOCODE) $(ETORDER)
+OUTPUTS = $(ETSHELL) $(ETSHELL2) $(ETOBJDUMP) $(ETSANDBOX) $(SANDBOX_LIBRARY) $(ETCOVERAGE) $(COVERAGE_LIBRARY) $(ETHARDEN) $(ETELF) $(ETPROFILE) $(ETTWOCODE) $(ETORDER) $(STEAMDRILL_INST)
 
 # Default target
 .PHONY: all
@@ -125,6 +132,7 @@ $(BUILDTREE): ../config/config.h
 	@ln -sf $(ETPROFILE)
 	@ln -sf $(ETTWOCODE)
 	@ln -sf $(ETORDER)
+	@ln -sf $(STEAMDRILL_INST)
 	@ln -sf $(shell pwd)/../src/$(BUILDDIR)libegalito.so $(BUILDDIR)libegalito.so
 
 .PHONY: rebuild-src
@@ -188,9 +196,17 @@ $(ETORDER): $(ETORDER_OBJECTS)
 	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^ $(CLDFLAGS) -Wl,-rpath=$(abspath ../src)
 $(ETORDER): ../src/$(BUILDDIR)libegalito.so
 
+$(ETSANDBOX): $(ETSANDBOX_OBJECTS)
+	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^ $(CLDFLAGS) -Wl,-rpath=$(abspath ../src)
+
 $(PYSHELL): $(PYTHON_BINDING) python/shell.py
 	cp python/shell.py $(BUILDDIR)pyshell
 	chmod +x $(BUILDDIR)pyshell
+
+$(STEAMDRILL_INST): $(STEAMDRILL_INST_OBJECTS)
+	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^ $(CLDFLAGS) -Wl,-rpath=$(abspath ../src)
+$(STEADMRILL_INST): ../src/$(BUILDDIR)libegalito.so
+
 
 $(BUILDDIR)sandbox/inject/%.o: sandbox/inject/%.c
 	$(SHORT_CC) $(CCFLAGS) -fPIC $(DEPFLAGS) -c -o $@ $<

@@ -99,6 +99,8 @@ void FixEnvironPass::visit(Program *program) {
         ChunkMutator(start, true);
     }
     movSem->regenerateAssembly();
+#elif defined(ARCH_I686)
+    // do nothing
 #else
     #error "Need FixEnvironPass for current arch!"
 #endif

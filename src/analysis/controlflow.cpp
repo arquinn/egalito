@@ -65,7 +65,7 @@ void ControlFlowGraph::construct(Block *block) {
     auto link = i->getSemantic()->getLink();
     bool fallThrough = false;
     if(auto cfi = dynamic_cast<ControlFlowInstruction *>(i->getSemantic())) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         if(cfi->getMnemonic() != "jmp") {
             // fall-through to next block
             fallThrough = true;
@@ -94,7 +94,7 @@ void ControlFlowGraph::construct(Block *block) {
         }
         else fallThrough = true;
 #endif
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         if(cfi->getMnemonic() != "callq" && link && link->getTarget()) {
 #elif defined(ARCH_AARCH64) || defined(ARCH_ARM)
         if(cfi->getMnemonic() != "bl" && link && link->getTarget()) {
@@ -133,7 +133,7 @@ void ControlFlowGraph::construct(Block *block) {
         }
     }
     else if(auto ij = dynamic_cast<IndirectJumpInstruction *>(i->getSemantic())) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         if(ij->getMnemonic() == "callq") {
             fallThrough = true;
         }

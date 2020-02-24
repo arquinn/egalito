@@ -13,6 +13,8 @@
 typedef
 #ifdef ARCH_X86_64
     x86_reg
+#elif defined(ARCH_I686)
+    x86_reg
 #elif defined(ARCH_AARCH64)
     arm64_reg
 #elif defined(ARCH_RISCV)
@@ -28,6 +30,12 @@ typedef
     #define REGISTER_ENDING     X86_REG_ENDING
     #define REGISTER_SP         X86_REG_RSP
     #define REGISTER_FP         X86_REG_RBP
+#elif defined(ARCH_I686)
+    #define INVALID_REGISTER    X86_REG_INVALID
+    #define CONDITION_REGISTER  X86_REG_EFLAGS
+    #define REGISTER_ENDING     X86_REG_ENDING
+    #define REGISTER_SP         X86_REG_ESP
+    #define REGISTER_FP         X86_REG_EBP
 #elif defined(ARCH_AARCH64)
     #define INVALID_REGISTER    ARM64_REG_INVALID
     #define CONDITION_REGISTER  ARM64_REG_NZCV
@@ -74,6 +82,39 @@ private:
     static int convertToPhysicalINT(int id);
 };
 #endif
+
+#ifdef ARCH_I686
+class I686Register {
+public:
+
+  // I think this looks problamatic...?
+    enum ID {
+        INVALID = -1,
+        R0 = 0, R1, R2, R3, R4, R5, R6, R7,
+        //        R8, R9, R10, R11, R12, R13, R14, R15,
+
+        REGISTER_NUMBER,
+
+        BP = R5,
+        SP = R4,
+
+        FLAGS = REGISTER_NUMBER
+    };
+
+private:
+    const static int mappings[R7 - R0 + 1][4];
+public:
+    static const char *getRepresentativeName(int reg);
+    static int convertToPhysical(int id);
+    static size_t getWidth(int pid, int id);
+    static int isInteger(int pid) { return (R0 <= pid && pid <= R7); }
+
+private:
+    static int convertToPhysicalINT(int id);
+};
+#endif
+
+
 
 #if defined(ARCH_AARCH64) || defined(ARCH_ARM)
 // rename this class

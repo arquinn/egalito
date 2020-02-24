@@ -130,8 +130,13 @@ void BasicElfStructure::makeHeader() {
     // set up e_ident field
     std::memset(header->e_ident, 0, EI_NIDENT);
     strncpy(reinterpret_cast<char *>(header->e_ident), ELFMAG, SELFMAG);
+#ifdef ARCH_I686
+    header->e_ident[EI_CLASS] = ELFCLASS32;
+#else
     header->e_ident[EI_CLASS] = ELFCLASS64;
-#ifdef ARCH_X86_64
+#endif
+
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     header->e_ident[EI_DATA] = ELFDATA2LSB;
 #else
     header->e_ident[EI_DATA] = ELFDATA2MSB;
@@ -149,6 +154,8 @@ void BasicElfStructure::makeHeader() {
     }
 #ifdef ARCH_X86_64
     header->e_machine = EM_X86_64;
+#elif defined(ARCH_I686)
+    header->e_machine = EM_386;
 #else
     header->e_machine = EM_AARCH64;
 #endif
@@ -188,7 +195,7 @@ void BasicElfStructure::makeHeader() {
 
 void BasicElfStructure::makeSymtabSection() {
     {
-        auto strtab = getSection(".strtab")->castAs<DeferredStringList *>();
+      auto strtab = getSection(".strtab")->castAs<DeferredStringList *>();
 
         auto symtabSection = getSection(".symtab");
         symtabSection->getHeader()->setSectionLink(
@@ -721,16 +728,27 @@ Function *MakeInitArray::findLibcCsuInit(Chunk *entryPoint) {
     if(entry->getChildren()->genericGetSize() == 0) return nullptr;
     auto block = entry->getChildren()->getIterable()->get(0);
 
+#if defined(ARCH_I686)
+    int pushCount = 0;
+#endif
     for(auto instr : CIter::children(block)) {
         if(auto link = instr->getSemantic()->getLink()) {
 #ifdef ARCH_X86_64
             if(!instr->getSemantic()->getAssembly()) continue;
             auto ops = instr->getSemantic()->getAssembly()->getAsmOperands();
-            if(ops->getOpCount() > 1) { 
+            if(ops->getOpCount() > 1) {
                 auto op1 = ops->getOperands()[1];
                 if(op1.type == X86_OP_REG && op1.reg == X86_REG_RCX) {
                     return dynamic_cast<Function *>(link->getTarget());
                 }
+            }
+#elif defined(ARCH_I686)
+            if(!instr->getSemantic()->getAssembly()) continue;
+            auto id = instr->getSemantic()->getAssembly()->getId();
+            if (id == X86_INS_PUSH) pushCount++;
+            if (pushCount == 5)
+            {
+              return dynamic_cast<Function *>(link->getTarget());
             }
 #else
 #error "Need __libc_csu_init detection code for current platform!"

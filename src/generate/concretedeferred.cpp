@@ -961,7 +961,7 @@ PLTCodeContent::DeferredType *PLTCodeContent::addEntry(
     }
 
     deferred->addFunction([this, index] (PLTCodeEntry *entry) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         address_t gotpltaddr = gotpltSection->getHeader()->getAddress();
         address_t pltaddr = pltSection->getHeader()->getAddress();
 

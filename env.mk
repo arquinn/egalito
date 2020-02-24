@@ -5,8 +5,8 @@ EGALITO_ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # Optional settings:
 #   USE_KEYSTONE=1
-#   USE_LOADER=1
-#   VERBOSE=1
+USE_LOADER=0
+VERBOSE=1
 #   PROFILE=1
 #   STACK_PROTECTOR=1
 
@@ -71,6 +71,11 @@ ifeq ($(USE_LOADER),1)
 GENERIC_FLAGS += -DUSE_LOADER
 endif
 
+
+ARGS_DIR = $(EGALITO_ROOT_DIR)/dep/args
+GENERIC_FLAGS += -I $(ARGS_DIR)
+
+
 OPT_FLAGS       = -g3 -Og
 DEPFLAGS        = -MT '$@ $(@:.o=.so) $(@:.o=.d)' -MMD -MF $(@:.o=.d) -MP
 CFLAGS          = -std=gnu99 $(GENERIC_FLAGS) $(OPT_FLAGS)
@@ -124,6 +129,11 @@ else ifeq (x86_64,$(P_ARCH))
 	CXXFLAGS += -DARCH_X86_64
 	AFLAGS += -DARCH_X86_64
 	BUILDDIR = build_x86_64/
+else ifeq (i686,$(P_ARCH))
+	CFLAGS += -DARCH_I686
+	CXXFLAGS += -DARCH_I686
+	AFLAGS += -DARCH_I686
+	BUILDDIR = build_I686/
 else ifeq (arm,$(P_ARCH))
 	CFLAGS += -DARCH_ARM
 	CXXFLAGS += -DARCH_ARM

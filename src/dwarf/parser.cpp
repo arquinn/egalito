@@ -178,7 +178,7 @@ DwarfCIE *DwarfParser::parseCIE(DwarfCursor start, DwarfCursor end,
 }
 
 DwarfFDE *DwarfParser::parseFDE(DwarfCursor start, DwarfCursor end,
-    uint64_t length, uint64_t cieIndex, uint32_t entryID) {
+    uint64_t length, size_t cieIndex, uint32_t entryID) {
 
     DwarfCIE *cie = info->getCIE(cieIndex);
     DwarfFDE *fde = new DwarfFDE(start.getStart(), length, cieIndex);

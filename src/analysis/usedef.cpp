@@ -523,7 +523,7 @@ void UseDef::analyzeGraph(const std::vector<int>& order) {
 }
 
 bool UseDef::callIfEnabled(UDState *state, Instruction *instruction) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     #define INVALID_ID  X86_INS_INVALID
 #elif defined(ARCH_AARCH64)
     #define INVALID_ID  ARM64_INS_INVALID

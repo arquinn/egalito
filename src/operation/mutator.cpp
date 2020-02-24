@@ -7,6 +7,7 @@
 #include "instr/instr.h"
 #include "disasm/reassemble.h"
 #include "disasm/disassemble.h"
+#include "instr/linked.h"
 #ifdef ARCH_X86_64
     #include "instr/linked-x86_64.h"
 #endif

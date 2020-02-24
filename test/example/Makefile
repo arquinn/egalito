@@ -4,8 +4,8 @@ include ../../env.mk
 MUSLCC_BIN = $(wildcard /usr/local/musl/bin/musl-gcc)
 MUSLCC = $(if $(MUSLCC_BIN),$(MUSLCC_BIN),touch $@;echo "--skipping")
 
-CFLAGS	= -fPIE -pie -O2
-STATIC_CFLAGS = -static -O2
+CFLAGS	= -fPIE -pie -O2 -std=gnu99
+STATIC_CFLAGS = -static -O2 -std=gnu99
 
 ADDCFLAGS-hi5 = -nostdlib -ffreestanding
 
@@ -17,6 +17,10 @@ else ifeq (x86_64,$(P_ARCH))
 	CFLAGS += -DARCH_X86_64
 	STATIC_CFLAGS += -DARCH_X86_64
 	BUILDDIR = build_x86_64/
+else ifeq (i686,$(P_ARCH))
+	CFLAGS += -DARCH_I686
+	STATIC_CFLAGS += -DARCH_I686
+	BUILDDIR = build_i686/
 else ifeq (arm,$(P_ARCH))
 	CFLAGS += -DARCH_ARM
 	STATIC_CFLAGS += -DARCH_ARM
@@ -119,7 +123,7 @@ $(BUILDDIR)%-strip:
 $(BUILDDIR)%-q:
 	$(CC) $(CFLAGS) $(call addcflags,$(notdir $@)) $^ -o $@ -Wl,-q
 $(BUILDDIR)%-obj:
-	$(CC) -c $^ -o $@
+	$(CC) -std=gnu99 -c $^ -o $@
 $(BUILDDIR)%-musl:
 	$(MUSLCC) $(CFLAGS) $(call addcflags,$(notdir $@)) $^ -o $@
 $(BUILDDIR)%-musl-static:

@@ -4,7 +4,8 @@
 #include "chunk/concrete.h"
 #include "chunk/link.h"
 #include "instr/semantic.h"
-#ifdef ARCH_X86_64
+#include "instr/linked.h"
+/*#ifdef ARCH_X86_64
 #include "instr/linked-x86_64.h"
 #endif
 #ifdef ARCH_AARCH64
@@ -13,7 +14,7 @@
 #ifdef ARCH_RISCV
 #include "instr/linked-riscv.h"
 #endif
-
+*/
 #include "log/log.h"
 #include "log/temp.h"
 

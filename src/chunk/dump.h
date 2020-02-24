@@ -3,6 +3,7 @@
 
 #include "chunk.h"
 #include "concrete.h"
+#include "instr/linked.h"
 #include "instr/visitor.h"
 #include "instr/concrete.h"
 #include "visitor.h"
@@ -58,7 +59,7 @@ public:
     virtual void visit(IsolatedInstruction *semantic);
     virtual void visit(LinkedInstruction *semantic);
     virtual void visit(ControlFlowInstruction *semantic);
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     virtual void visit(DataLinkedControlFlowInstruction *semantic);
 #endif
     virtual void visit(IndirectJumpInstruction *semantic);

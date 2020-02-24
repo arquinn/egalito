@@ -40,6 +40,9 @@ extern "C"
 void egalito_log_function(unsigned long address) {
 #ifdef ARCH_X86_64
     #define DISTANCE_FROM_ENTRY     9
+#elif defined(ARCH_I686)
+  // certainly wrong:
+    #define DISTANCE_FROM_ENTRY     9
 #elif defined(ARCH_AARCH64)
     #define DISTANCE_FROM_ENTRY     12
 #elif defined(ARCH_RISCV)
@@ -52,6 +55,8 @@ void egalito_log_function(unsigned long address) {
 extern "C"
 void egalito_log_function_ret(unsigned long address) {
 #ifdef ARCH_X86_64
+    #define DISTANCE_FROM_EXIT      4
+#elif defined(ARCH_I686)
     #define DISTANCE_FROM_EXIT      4
 #elif defined(ARCH_AARCH64)
     #define DISTANCE_FROM_EXIT      4

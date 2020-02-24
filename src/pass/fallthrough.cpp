@@ -32,14 +32,14 @@ void FallThroughFunctionPass::visit(Function *function) {
         else if(dynamic_cast<IndirectJumpInstruction *>(semantic)) {
             falling = false;
         }
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
         else if(dynamic_cast<DataLinkedControlFlowInstruction *>(semantic)) {
             falling = false;
         }
 #endif
         else if(auto cfi = dynamic_cast<ControlFlowInstruction *>(semantic)) {
             falling = false;
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
             if(cfi->getMnemonic() != "callq" && cfi->getMnemonic() != "jmp") {
                 falling = true;
             }
@@ -89,7 +89,7 @@ void FallThroughFunctionPass::visit(Function *function) {
         }
         else if(dynamic_cast<IsolatedInstruction *>(semantic)) {
             if(auto assembly = semantic->getAssembly()) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
                 if(assembly->getId() == X86_INS_UD2) {
                     falling = false;
                 }
@@ -189,7 +189,7 @@ void FallThroughFunctionPass::visit(Function *function) {
             // add a branch instruction to the 'target' instruction
             DisasmHandle handle(true);
             auto branch = new Instruction();
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
             auto semantic = new ControlFlowInstruction(
                 X86_INS_JMP, branch, "\xe9", "jmp", 4);
 #elif defined(ARCH_AARCH64)
