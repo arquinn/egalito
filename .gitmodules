@@ -1,5 +1,5 @@
 [submodule "test/binary"]
-1;5202;0c	path = test/binary
+	path = test/binary
 	url = git@github.com:columbia/egalito-tests
 [submodule "dep/capstone"]
 	path = dep/capstone
