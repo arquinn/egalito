@@ -1,5 +1,5 @@
 [submodule "test/binary"]
-	path = test/binary
+1;5202;0c	path = test/binary
 	url = git@github.com:columbia/egalito-tests
 [submodule "dep/capstone"]
 	path = dep/capstone
@@ -13,6 +13,3 @@
 [submodule "dep/keystone"]
 	path = dep/keystone
 	url = git@github.com:keystone-engine/keystone.git
-[submodule "dep/args"]
-	path = dep/args
-	url = https://github.com/Taywee/args
