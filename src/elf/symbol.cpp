@@ -158,6 +158,10 @@ SymbolList *SymbolList::buildSymbolList(ElfMap *elfMap) {
         return nullptr;
     }
 
+    auto initArrSec = elfMap->findSection(".init_array");
+    if (!initArrSec) LOG(1, "cannot even find init_arry");
+    else LOG(1, std::hex << "init_array " << initArrSec->getName() << " " << initArrSec->getVirtualAddress() << " " << initArrSec->getReadAddress());
+
     auto list = buildAnySymbolList(elfMap, ".symtab", SHT_SYMTAB);
     fixFunctionTypes(list, elfMap);
 
@@ -185,9 +189,10 @@ SymbolList *SymbolList::buildSymbolList(ElfMap *elfMap) {
     if(auto s = list->find("_fini")) {  // musl incorrectly sets this to 4
         auto fini = elfMap->findSection(".fini");
         if(fini) s->setSize(fini->getHeader()->sh_size);
-        if(fini) LOG(6, "setting the size of _init to " << fini->getHeader()->sh_size);
+        if(fini) LOG(6, "setting the size of _fini to " << fini->getHeader()->sh_size);
     }
     if(auto s = list->find("__init_array_begin")) {
+        LOG(1, "found __init_array_begin..." << s->getSize() << " " << s->getAddress());
         s->setType(Symbol::TYPE_OBJECT);  // this is really a marker
         s->setSize(8);
     }

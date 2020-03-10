@@ -236,7 +236,7 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
     #define R_JUMP_SLOT R_X86_64_JUMP_SLOT
     #define R_IRELATIVE R_X86_64_IRELATIVE
 #elif defined(ARCH_I686)
-#define R_JUMP_SLOT 7 //R_386_JUMP_SLOT
+    #define R_JUMP_SLOT 7 //R_386_JUMP_SLOT
     #define R_IRELATIVE R_386_IRELATIVE
 #elif defined(ARCH_AARCH64)
     #define R_JUMP_SLOT R_AARCH64_JUMP_SLOT
@@ -250,7 +250,8 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
     for(auto r : *relocList) {
         if(r->getType() == R_JUMP_SLOT) {
             LOG(1, "PLT entry at " << r->getAddress()
-                << " to " << r->getAddend());
+                << " to " << r->getAddend()
+                << " name " << r->getSymbolName());
             registry->add(r->getAddress(), r);
         }
         else if(r->getType() == R_IRELATIVE) {
@@ -354,15 +355,22 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
     */
 
     // note: we skip the first PLT entry, which has a different format
+    auto gotPltSection = elf->findSection(".got.plt");
+    assert (gotPltSection);
+    auto gotPltHeader = gotPltSection->getHeader();
+    address_t gotPltAddress = gotPltHeader->sh_addr;
+
     for(size_t i = 1 * ENTRY_SIZE; i < header->sh_size; i += ENTRY_SIZE) {
         auto entry = section + i;
 
         LOG(1, "CONSIDER PLT entry at " << entry);
 
-        if(*reinterpret_cast<const unsigned short *>(entry) == 0x25ff) {
-            address_t pltAddress = header->sh_addr + i;
+        if(*reinterpret_cast<const unsigned short *>(entry) == 0xa3ff) {
+            //address_t pltAddress = header->sh_addr + i;
             address_t value = *reinterpret_cast<const unsigned int *>(entry + 2)
-                + (pltAddress + 2+4);  // target is RIP-relative
+                    + gotPltAddress; // the gotPltAddress is in %ebx coming in
+                    // + (pltAddress + 2+4);  // target is RIP-relative
+
             LOG(1, "PLT value would be " << value);
             Reloc *r = registry->find(value);
             if(r) {
@@ -374,12 +382,12 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
                 auto externalSymbol = ExternalSymbolFactory(module)
                     .makeExternalSymbol(symbol);
                 auto trampoline = new PLTTrampoline(
-                    pltList, pltAddress, externalSymbol, value);
+                    pltList, gotPltAddress, externalSymbol, value);
 
                 static DisasmHandle handle(true);
                 auto jmp1 = new Instruction();
                 auto jmp1sem = new DataLinkedControlFlowInstruction(X86_INS_JMP, jmp1,
-                    "\xff\x25", "jmpq", 4);
+                    "\xff\xa3", "jmpq", 4);
                 jmp1->setSemantic(jmp1sem);
                 /// data link null???
                 jmp1sem->setLink(module->getDataRegionList()
@@ -388,9 +396,12 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
                         << jmp1sem->getLink());
                 //jmp1->setPosition(new AbsolutePosition(0x0));
                 //jmp1sem->regenerateAssembly();
+
+                // leave push instruction the same as the input
                 auto push = DisassembleInstruction(handle, true)
                     .instruction(std::string(
                     reinterpret_cast<const char *>(entry + 6), 5));
+
                 auto jmp2 = new Instruction();
                 auto jmp2sem = new ControlFlowInstruction(X86_INS_JMP, jmp2,
                     "\xe9", "jmpq", 4);
@@ -492,6 +503,7 @@ PLTList *PLTList::parse(RelocList *relocList, ElfMap *elf, Module *module) {
     }
 #endif
 
+    // this looks problematic if left unfixed I would think
     parsePLTGOT(relocList, elf, pltList, module);
     return pltList;
 }

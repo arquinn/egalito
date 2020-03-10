@@ -19,6 +19,7 @@
     typedef Elf32_Phdr  ElfXX_Phdr;
     typedef Elf32_Nhdr  ElfXX_Nhdr;
     typedef Elf32_Rela  ElfXX_Rela;
+    typedef Elf32_Rel   ElfXX_Rel;
     typedef Elf32_Sym   ElfXX_Sym;
     typedef Elf32_Dyn   ElfXX_Dyn;
     typedef Elf32_Versym ElfXX_Versym;

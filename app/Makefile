@@ -1,5 +1,4 @@
 # Makefile for egalito applications
-
 include ../env.mk
 
 # Dependencies for Python Bindings
@@ -12,6 +11,9 @@ CXXFLAGS    += -g -I ../src/
 CLDFLAGS    += -L ../src/$(BUILDDIR) -legalito \
 	-Wl,-rpath=$(abspath ../src/$(BUILDDIR)) \
 	-Wl,-rpath=$(abspath ../dep/capstone/install/lib)
+
+DEPFLAGS   +=  -I "../../../sledgehammer/config_structs/"
+#
 
 ELF_SOURCES             = $(wildcard elf/*.cpp)
 SANDBOX_SOURCES         = $(wildcard sandbox/*.c sandbox/*.cpp)
@@ -61,7 +63,7 @@ ETORDER_SOURCES = $(ORDER_SOURCES)
 ETORDER_OBJECTS = $(call obj-filename,$(ETORDER_SOURCES))
 
 STEAMDRILL_INST_SOURCES = $(STEAMDRILL_SOURCES)
-STEAMDRILL_INST_OBJECTS = $(call obj-filename,$(STEAMDRILL_INST_SOURCES))
+STEAMDRILL_INST_OBJECTS = $(call obj-filename,$(STEAMDRILL_INST_SOURCES)) 
 
 ALL_SOURCES = $(sort $(ETSHELL_SOURCES) $(ETSHELL2_SOURCES) $(ETOBJDUMP_SOURCES) \
     $(ETSANDBOX_SOURCES) $(LIBSANDBOX_SOURCES) \
@@ -204,7 +206,7 @@ $(PYSHELL): $(PYTHON_BINDING) python/shell.py
 	chmod +x $(BUILDDIR)pyshell
 
 $(STEAMDRILL_INST): $(STEAMDRILL_INST_OBJECTS)
-	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^ $(CLDFLAGS) -Wl,-rpath=$(abspath ../src)
+	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^  "../../../sledgehammer/config_structs/tracer_configuration.o" $(CLDFLAGS) -Wl,-rpath=$(abspath ../src) -lboost_regex -lboost_serialization
 $(STEADMRILL_INST): ../src/$(BUILDDIR)libegalito.so
 
 

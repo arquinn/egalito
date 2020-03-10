@@ -35,13 +35,19 @@ RelocSection *RelocList::getSection(const std::string &name) {
     return (it != sectionList.end() ? (*it).second : nullptr);
 }
 
+
 RelocList *RelocList::buildRelocList(ElfMap *elf, SymbolList *symbolList,
     SymbolList *dynamicSymbolList) {
 
     RelocList *list = new RelocList();
 
     CLOG(0, "building relocation list");
+
+#ifdef ARCH_I686
+    std::vector<void *> sectionList = elf->findSectionsByType(SHT_REL);
+#else
     std::vector<void *> sectionList = elf->findSectionsByType(SHT_RELA);
+#endif
     for(void *p : sectionList) {
         // Note: 64-bit x86 always uses RELA relocations (not REL),
         // according to readelf source: see the function guess_is_rela()
@@ -55,22 +61,35 @@ RelocList *RelocList::buildRelocList(ElfMap *elf, SymbolList *symbolList,
         LOG(1, "reloc section [" << name << ']');
 
         SymbolList *currentSymbolList = symbolList;
+#ifdef ARCH_I686
+        if(std::strcmp(name, ".rel.plt") == 0
+           || std::strcmp(name, ".rel.dyn") == 0) {
+#else
         if(std::strcmp(name, ".rela.plt") == 0
             || std::strcmp(name, ".rela.dyn") == 0) {
-
+#endif
             currentSymbolList = dynamicSymbolList;
         }
 
         // We don't have the appropriate symbol section for these relocations.
         // This can happen when a shared object is statically linked.
         if(!currentSymbolList) continue;
-
+#ifdef ARCH_I686
+        ElfXX_Rel *data = reinterpret_cast<ElfXX_Rel *>(
+            elf->getCharmap() + s->sh_offset);
+#else
         ElfXX_Rela *data = reinterpret_cast<ElfXX_Rela *>(
             elf->getCharmap() + s->sh_offset);
+#endif
 
         size_t count = s->sh_size / sizeof(*data);
+        LOG(1, "contain " << count << " relocations");
         for(size_t i = 0; i < count; i ++) {
+#ifdef ARCH_I686
+            ElfXX_Rel *r = &data[i];
+#else
             ElfXX_Rela *r = &data[i];
+#endif
             auto symbolIndex = ELFXX_R_SYM(r->r_info);
             Symbol *sym = nullptr;
             if(symbolIndex > 0) {
@@ -91,7 +110,36 @@ RelocList *RelocList::buildRelocList(ElfMap *elf, SymbolList *symbolList,
                     }
                 }
             }
+#ifdef ARCH_I686
+            // in rel structures the addend is implicitly stored
+            // in the O.G. Binary.
+            // first, determine the section where this address belongs:
+            address_t addend = 0;
+            if (type == R_386_RELATIVE)
+            {
+                for (auto sec : elf->getSectionList())  {
+                    if (sec->getVirtualAddress() &&
+                        sec->getVirtualAddress() <= address &&
+                        sec->getVirtualAddress() + sec->getSize() >= address) {
+                        LOG(1, "reloc @ " << address << " in section " << sec->getName());
 
+                        uintptr_t off = address - sec->getVirtualAddress();
+                        LOG(1, "offset within section is " << off);
+                        char *readPtr = elf->getSectionReadPtr<char*>(sec);
+                        addend = *reinterpret_cast<address_t *>(readPtr + off);
+
+                        LOG(1, "at that location is...? " << addend);
+                    }
+                }
+            }
+            Reloc *reloc = new Reloc(
+                address,                                // address
+                type,                                   // type
+                ELFXX_R_SYM(r->r_info),                 // symbol index
+                sym,
+                addend                             // addend
+            );
+#else
             Reloc *reloc = new Reloc(
                 address,                                // address
                 type,                                   // type
@@ -99,6 +147,8 @@ RelocList *RelocList::buildRelocList(ElfMap *elf, SymbolList *symbolList,
                 sym,
                 r->r_addend                             // addend
             );
+#endif
+
 
             CLOG0(2, "    reloc at address 0x%08lx, type %d, target [%s]\n",
                 reloc->getAddress(), reloc->getType(),

@@ -22,7 +22,7 @@ void BasicElfCreator::execute() {
 
     auto interpSection = new Section(".interp", SHT_PROGBITS, 0);
     getSectionList()->addSection(interpSection);
-    
+
     if(makeInitArray) {
         auto initArraySection = new Section(".init_array", SHT_INIT_ARRAY,
             SHF_WRITE | SHF_ALLOC);
@@ -331,10 +331,12 @@ void BasicElfStructure::makePhdrTable() {
     });
 
     auto interpSection = getSection(".interp");
-#ifndef USE_MUSL
-    const char *interpreter = "/lib64/ld-linux-x86-64.so.2";
-#else
+#ifdef ARCH_I686
+    const char *interpreter = "/lib/ld-linux.so.2";
+#elif defined(USE_MUSL)
     const char *interpreter = "/lib/ld-musl-x86_64.so.1";
+#else
+    const char *interpreter = "/lib64/ld-linux-x86-64.so.2";
 #endif
     auto interpContent = new DeferredString(interpreter, strlen(interpreter) + 1);
     interpSection->setContent(interpContent);
@@ -572,6 +574,7 @@ MakeInitArray::MakeInitArray(int stage) : stage(stage), initArraySize(0) {
 }
 
 void MakeInitArray::execute() {
+    LOG(1, "makeInitArray, stage " << stage);
     if(stage == 0) {
         makeInitArraySections();
     } else {
@@ -586,7 +589,11 @@ void MakeInitArray::addInitFunction(InitArraySectionContent *content,
         auto relaDyn = getData()->getSection(".rela.dyn")->castAs<DataRelocSectionContent *>();
 
         // !!! Hardcoding this address for now. After =elfheader & .interp
+#ifdef ARCH_I686
+        const address_t INIT_ARRAY_ADDR = 0x200047 + initArraySize;
+#else
         const address_t INIT_ARRAY_ADDR = 0x20005c + initArraySize;
+#endif
         auto offset = content->getSize();
         relaDyn->addDataAddressRef(INIT_ARRAY_ADDR + offset, value);
         content->addPointer([] () { return address_t(0); });
@@ -641,7 +648,6 @@ void MakeInitArray::makeInitArraySectionHelper(const char *type,
                 }
             }
         }
-
         if(firstInit) {
             addInitFunction(content, [this, module, firstInit] () {
                 Function *function = nullptr;
@@ -670,6 +676,7 @@ void MakeInitArray::makeInitArraySectionHelper(const char *type,
         addInitFunction(content, [link] () { return link->getTargetAddress(); });
     }
 #else
+    LOG(1, "makeInitArraySectionHeader");
     Function *firstInit = nullptr;
     std::vector<Function *> initFunctions;
     for(auto module : CIter::children(getData()->getProgram())) {
@@ -679,6 +686,7 @@ void MakeInitArray::makeInitArraySectionHelper(const char *type,
 
         for(auto initFunc : CIter::children(list)) {
             auto function = initFunc->getFunction();
+            LOG(1, "and another one... " << function->getAddress());
             if(initFunc->isSpecialCase()) {
                 LOG(1, "Found " << type << " special func at 0x"
                     << std::hex << function->getAddress());
