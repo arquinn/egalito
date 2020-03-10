@@ -1,15 +1,20 @@
 [submodule "test/binary"]
 	path = test/binary
 	url = git@github.com:columbia/egalito-tests
+	ignore = untracked
 [submodule "dep/capstone"]
 	path = dep/capstone
 	url = git@github.com:columbia/egalito-capstone
+	ignore = untracked
 [submodule "dep/distorm3"]
 	path = dep/distorm3
 	url = https://github.com/gdabah/distorm
+	ignore = untracked
 [submodule "docs"]
 	path = docs
 	url = git@github.com:columbia/egalito-docs.git
 [submodule "dep/keystone"]
 	path = dep/keystone
 	url = git@github.com:keystone-engine/keystone.git
+[submodule "dep/distrom3"]
+	ignore = untracked
