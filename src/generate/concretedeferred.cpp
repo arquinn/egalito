@@ -496,6 +496,7 @@ RelocSectionContent::DeferredType *RelocSectionContent
     rela->r_offset  = address;
     rela->r_info    = 0;
     rela->r_addend  = specialAddendOffset;
+    LOG(0, "makeDeferedForLink " << rela->r_offset);
 
     DeferredMap<address_t, ElfXX_Rela>::add(address, deferred);
     return deferred;
@@ -663,6 +664,8 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
         rela->r_info = ELF64_R_INFO(0, R_X86_64_64);
     });
 
+    LOG(0, "addDataRef " << rela->r_offset);
+
     DeferredMap<address_t, ElfXX_Rela>::add(source, deferred);
     return deferred;
 }
@@ -713,6 +716,8 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
         rela->r_addend = getTarget();
     });
 
+    LOG(0, "addDataAddressRef " << rela->r_offset);
+        
     DeferredMap<address_t, ElfXX_Rela>::add(source, deferred);
     return deferred;
 }
@@ -731,6 +736,8 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
     /*deferred->addFunction([this, symtab, name] (ElfXX_Rela *rela) {
         rela->r_info = ELF64_R_INFO(0, R_X86_64_64);
     });*/
+
+    LOG(0, "addDataArbitraryRef " << rela->r_offset);
 
     DeferredMap<address_t, ElfXX_Rela>::add(var->getAddress(), deferred);
     return deferred;
@@ -849,6 +856,12 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
 DataRelocSectionContent::DeferredType *DataRelocSectionContent
     ::addPLTRef(Section *gotPLT, PLTTrampoline *plt, size_t pltIndex) {
 
+#ifdef ARCH_X86_64
+    #define R_JUMP_SLOT R_X86_64_JUMP_SLOT
+#elif defined(ARCH_I686)
+    #define R_JUMP_SLOT 7 //R_386_JUMP_SLOT
+#endif
+
     auto rela = new ElfXX_Rela();
     std::memset(rela, 0, sizeof(*rela));
     auto deferred = new DeferredType(rela);
@@ -858,15 +871,17 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
     rela->r_addend  = 0;
 
     auto extSymbol = plt->getExternalSymbol();
-    auto symbol = makeSymbol(extSymbol->getName(),
-        Symbol::TYPE_FUNC, extSymbol->getBind());
+    auto symbol = makeSymbol(extSymbol->getName(), Symbol::TYPE_FUNC, extSymbol->getBind());
+
     auto dynsym = (*sectionList)[".dynsym"]->castAs<SymbolTableContent *>();
     auto symtab = (*sectionList)[".symtab"]->castAs<SymbolTableContent *>();
     auto elfSym = plt->getTarget()
         ? dynsym->addPLTSymbol(plt, symbol)
         : dynsym->addUndefinedSymbol(symbol);
+
     if(plt->getTarget()) symtab->addPLTSymbol(plt, symbol);
     else symtab->addUndefinedSymbol(symbol);
+
     deferred->addFunction([this, gotPLT, plt, dynsym, elfSym, extSymbol, pltIndex]
         (ElfXX_Rela *rela) {
 
@@ -877,14 +892,22 @@ DataRelocSectionContent::DeferredType *DataRelocSectionContent
         size_t index = dynsym->indexOf(elfSym);
         LOG(1, "    index looks like " << index << " for elfSym " << elfSym);
         if(plt->isPltGot()) {
+            // I'm not certain how this stuff works.. for now just ignore:
+            LOG(1, "pltGot PLT's are unsupported.");
+            assert (false);
             rela->r_info = ELF64_R_INFO(index, R_X86_64_GLOB_DAT);
         }
         else {
-            rela->r_info = ELF64_R_INFO(index, R_X86_64_JUMP_SLOT);
+            rela->r_info = ELFXX_R_INFO(index, R_JUMP_SLOT);
         }
 
         rela->r_offset = gotPLT->getHeader()->getAddress()
             + (pltIndex * sizeof(address_t));
+
+        LOG(1, "in summary: " << rela->r_offset
+            << " info " << rela->r_info
+            << " type " << ELFXX_R_TYPE(rela->r_info)
+            << " sym  " << ELFXX_R_SYM(rela->r_info) );
     });
 
     DeferredMap<address_t, ElfXX_Rela>::add(plt->getAddress(), deferred);
@@ -946,7 +969,7 @@ PLTCodeContent::DeferredType *PLTCodeContent::addEntry(
 
     auto entry = new PLTCodeEntry();
     auto deferred = new DeferredType(entry);
-
+#if defined(ARCH_X86_64)
     if(index == 0) {
         std::memcpy(entry->data,
             "\xff\x35\x00\x00\x00\x00"
@@ -961,7 +984,7 @@ PLTCodeContent::DeferredType *PLTCodeContent::addEntry(
     }
 
     deferred->addFunction([this, index] (PLTCodeEntry *entry) {
-#if defined(ARCH_X86_64) || defined(ARCH_I686)
+
         address_t gotpltaddr = gotpltSection->getHeader()->getAddress();
         address_t pltaddr = pltSection->getHeader()->getAddress();
 
@@ -986,6 +1009,42 @@ PLTCodeContent::DeferredType *PLTCodeContent::addEntry(
 
             *(int32_t *)(entry->data + PLTCodeEntry::EntryJmp) = jmpOffset;
             *(int32_t *)(entry->data + PLTCodeEntry::EntryPush) = index-1;
+            *(int32_t *)(entry->data + PLTCodeEntry::EntryJmp2) = jmp2Offset;
+        }
+#elif defined(ARCH_I686)
+    if(index == 0) {
+        std::memcpy(entry->data,
+            "\xff\xb3\x00\x00\x00\x00"
+            "\xff\xa3\x00\x00\x00\x00"
+            "\x0f\x1f\x40\x00", 16);
+    }
+    else {
+        std::memcpy(entry->data,
+            "\xff\xa3\x00\x00\x00\x00"
+            "\x68\x00\x00\x00\x00"
+            "\xe9\x00\x00\x00\x00", 16);
+    }
+
+    deferred->addFunction([this, index] (PLTCodeEntry *entry) {
+
+        address_t gotpltaddr = gotpltSection->getHeader()->getAddress();
+        address_t pltaddr = pltSection->getHeader()->getAddress();
+
+        const size_t gotPadding = 3;
+
+        if(index == 0) {
+            ssize_t pushOffset = 1 * sizeof(address_t);
+            ssize_t jmpOffset = 2 * sizeof(address_t);
+
+            *(int32_t *)(entry->data + PLTCodeEntry::Entry0Push) = pushOffset;
+            *(int32_t *)(entry->data + PLTCodeEntry::Entry0Jmp) = jmpOffset;
+        }
+        else {
+            ssize_t jmpOffset = ((index-1+gotPadding) * sizeof(address_t));
+            ssize_t jmp2Offset = -16 - (index*0x10);
+
+            *(int32_t *)(entry->data + PLTCodeEntry::EntryJmp) = jmpOffset;
+            *(int32_t *)(entry->data + PLTCodeEntry::EntryPush) = (index-1) * 2 * sizeof(address_t);
             *(int32_t *)(entry->data + PLTCodeEntry::EntryJmp2) = jmp2Offset;
         }
 #else

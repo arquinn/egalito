@@ -83,6 +83,9 @@ void IFuncPLTs::visit(PLTTrampoline *trampoline) {
         ChunkMutator m(trampoline, true);
         m.append(block2);
     }
+#elif defined(ARCH_I686)
+    if(!trampoline->isIFunc()) return;
+    assert (0);
 #else
     assert(0); // shouldn't be reached
 #endif

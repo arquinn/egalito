@@ -40,6 +40,14 @@ void PromoteJumpsPass::visit(Instruction *instruction) {
             << " is too large for 32-bit reach: " << std::hex << disp);
         std::abort();
     }
+#elif defined(ARCH_I686)
+    ChunkDumper dump(false);
+    auto v = dynamic_cast<ControlFlowInstruction *>(instruction->getSemantic());
+    if(!v) return;
+
+    if(!v->getLink()) return;
+
+    //    LOG(1, "linkAddr: " << v->getLink()->getTargetAddress());
 #endif
 }
 

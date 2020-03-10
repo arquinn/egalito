@@ -118,6 +118,8 @@ LinkedInstructionBase *LinkedInstruction::makeLinked(Module *module,
     Link *dispLink = nullptr;
     for(size_t i = 0; i < asmOps->getOpCount(); i ++) {
         const cs_x86_op *op = &asmOps->getOperands()[i];
+
+        // this is obviously incorrect (!)
         if(MakeSemantic::isRIPRelative(&*assembly, i)) {
             assert(!dispLink);
             address_t target
@@ -174,11 +176,14 @@ LinkedInstructionBase *LinkedInstruction::makeLinked(Module *module,
             dispIndex = i;
         }
         else if(op->type == X86_OP_IMM) {
+            LOG(1, instruction->getAddress() << " has target " << op->imm);
+
             auto elfMap = module->getElfSpace()->getElfMap();
             if(elfMap->isExecutable() && !elfMap->hasRelocations()) {
                 address_t target = op->imm;
-                auto found = CIter::spatial(module->getFunctionList())
-                    ->find(target);
+
+
+                auto found = CIter::spatial(module->getFunctionList())->find(target);
                 if(found) {
                     immLink = new AbsoluteNormalLink(found,
                         Link::SCOPE_WITHIN_MODULE);
@@ -188,6 +193,7 @@ LinkedInstructionBase *LinkedInstruction::makeLinked(Module *module,
         }
     }
 
+    // what if target is just an instruction?
     if(immIndex < 0 && dispIndex < 0) {
         return nullptr;
     }

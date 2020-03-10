@@ -123,7 +123,6 @@ Module *Disassemble::makeModuleFromSymbols(ElfMap *elfMap,
 #ifdef ARCH_I686
     /* consider any space between start of .text and first function as
         potential crt function locations */
-    LOG(1, "Reaching potential problem code. ");
     auto text = elfMap->findSection(".text");
     address_t smallest = -1u;
     for(auto it : (*symbolList)) {
@@ -1910,7 +1909,6 @@ bool DisassembleFunctionBase::shouldSplitBlockAt(cs_insn *ins) {
         split = true;
     }
 #elif defined(ARCH_I686)
-    LOG(1, "potential problem code 3");
     if(cs_insn_group(handle.raw(), ins, X86_GRP_JUMP)) {
         split = true;
     }

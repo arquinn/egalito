@@ -360,6 +360,9 @@ Link *PerfectLinkResolver::resolveExternallyStrongWeak(ExternalSymbol *externalS
     Conductor *conductor, Module *module, bool relative,
     bool afterMapping) {
 
+    LOG(1, "resolving externally strong weak: " << externalSymbol->getName()
+        << " @@ " << externalSymbol->getVersion());
+    
     auto l = resolveExternallyHelper(externalSymbol->getName().c_str(),
         externalSymbol->getVersion(), conductor, module, /*weak=*/ false,
         relative, afterMapping);
@@ -454,7 +457,7 @@ Link *PerfectLinkResolver::resolveNameAsLinkHelper(const char *name,
     const SymbolVersion *version,
     Module *module, bool weak, bool relative, bool afterMapping) {
 
-    LOG(1, "        resolveNameAsLinkHelper (" << name << ") inside "
+    LOG(1, "        AHH resolveNameAsLinkHelper (" << name << " " << (void*)name << ") inside "
         << module->getName());
 
     if(auto link = resolveNameAsLinkHelper2(
@@ -496,7 +499,7 @@ Link *PerfectLinkResolver::resolveNameAsLinkHelper2(const char *name,
     }
     symbol = list->find(name);
     if(!symbol) {
-        LOG(11, "no symbol " << module->getName());
+        LOG(11, "no symbol " << name << " in " << module->getName());
         return nullptr;
     }
 
@@ -527,6 +530,9 @@ Link *PerfectLinkResolver::resolveNameAsLinkHelper2(const char *name,
             symbol, relative);
     }
 #endif
+    // this first piece is the problem..
+    // What happens when I have a relocation???
+
     if(symbol->getAddress() > 0
         && symbol->getType() != Symbol::TYPE_FUNC
         && symbol->getType() != Symbol::TYPE_IFUNC) {

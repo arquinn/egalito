@@ -25,6 +25,8 @@ void HandleDataRelocsPass::visit(Module *module) {
             section->getName());
         if(!relocSection) continue;  // no relocs in this ElfSection
 
+        LOG(1, "handling data relocs in " << section->getName());
+
         if(auto info = relocSection->getInfoLink()) {
             auto sourceSection = elfMap->findSection(info);
             if(sourceSection->getName() == "__kcrctab") continue;
@@ -189,6 +191,9 @@ Link *HandleDataRelocsPass::resolveVariableLink(Reloc *reloc, Module *module) {
         return l;
     }
 #elif defined(ARCH_I686)
+    LOG(0, "reloc t " << reloc->getType()
+        << " addr " << reloc->getAddress());
+    
     if(reloc->getType() == R_386_NONE) {
         return nullptr;
     }
