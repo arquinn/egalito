@@ -1,5 +1,4 @@
 #include <cstring>  // for std::strcmp
-
 #include <libgen.h>
 
 #include <fstream>
@@ -100,36 +99,46 @@ unique_ptr<fxnPointer> fxnPointer::theInstance = nullptr;
 //forward decls
 Function* getInstRegion(address_t lowPC, address_t highPC, std::string file);
 
-class Instrumentation {
-  public:
-    Function* code;
-    Instrumentation(Function *c): code(c) {};
-};
-
 class SteamdrillSO {
   private:
     vector<std::string> pushInsts, popInsts;
     std::string outputFile;
+    std::string cfTramp;
     vector<InstConfiguration*> instructionMapping;
 
-    vector<string> buildInstBlock(string outputFxn);
+    vector<string> buildInstBlock(uintptr_t origEip, string outputFxn);
+
+    static inline string buildLabel(string lname);
   public:
     vector<string> insts;
 
     SteamdrillSO(string filename);
 
-    void instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj);
+    void instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj,
+                    address_t lowAddr, address_t highaddr);
     void write(string outFile);
 };
+
+string SteamdrillSO::buildLabel(string lname) {
+    stringstream label;
+    label << "\".global " << lname << "\\n\"\n\"" << lname << ":\\n\"\n";
+    return label.str();
+}
 
 SteamdrillSO::SteamdrillSO(string filename) {
     outputFile = filename;
     pushInsts = {"\t\"mov %esp, (tempEsp)\\n\"",
                  "\t\"mov tracerStack, %esp\\n\"",
-                 "\t\"mov (%esp), %esp\\n\"",
-                 "\t\"pusha\\n\""};
-    popInsts = {"\t\"popa\\n\"",
+                 "\t\"pusha\\n\"",
+                 "\t\"pushf\\n\""};
+    popInsts = {"\t\"popf\\n\"",
+                "\t\"popa\\n\"",
                 "\t\"mov tempEsp, %esp\\n\""};
+
+    cfTramp = "cfJmpTramp";
+    stringstream tramp;
+    tramp << buildLabel(cfTramp) << "\t\"jmp *cfPtr\\n\"";
+    insts.push_back(tramp.str());
 }
 /*
 void SteamdrillSO::initStandardInstBlock(string tracerSO) {
@@ -233,13 +242,17 @@ void SteamdrillSO::createDataSection() {
 }
 */
 
-
-vector<string> SteamdrillSO::buildInstBlock(string tracer) {
+vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer) {
     std::vector<std::string> instrs;
+    char eipInst[64];
+
     assert(!pushInsts.empty() && !popInsts.empty());
+
+    sprintf(eipInst, "\t\"movl $0x%x, (origEip)\\n\"", origEip);
 
     // how do I add an external link???
     instrs.insert(std::begin(instrs), std::begin(pushInsts), std::end(pushInsts));
+    instrs.push_back(eipInst);
     instrs.push_back("\t\"call tracerBegin\\n\"");
     instrs.push_back("\t\"call " + tracer + "\\n\"");
     instrs.push_back("\t\"call tracerEnd\\n\"");
@@ -309,9 +322,19 @@ vector<string> SteamdrillSO::buildInstBlock(string tracer) {
 
 }
 
-void SteamdrillSO::instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj) {
+inline bool isJmp(int opId) {
+    return (opId >= X86_INS_JAE && opId <= X86_INS_JS) || opId == X86_INS_LJMP;
+}
+
+inline bool isCondJmp(int opId) {
+    return opId >= X86_INS_JAE && opId <= X86_INS_JS && opId != X86_INS_JMP;
+}
+
+static int posOpt = 0;
+void SteamdrillSO::instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj,
+                              address_t lowAddr, address_t highAddr) {
     stringstream fxn;
-    auto toCall = buildInstBlock(outputFxn);
+
     for (auto blkIter : CIter::children(toInst))
     {
         auto b = blkIter->getChildren()->getIterable();
@@ -319,29 +342,60 @@ void SteamdrillSO::instrument(Function *toInst, address_t jmpTo, string outputFx
             Instruction *i = b->get(index);
             Assembly *assem = i->getSemantic()->getAssembly().get();
 
-            // fixup the instructions...
-            if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL ||
-                assem->getId() == X86_INS_JMP || assem->getId() == X86_INS_LJMP) {
-                std::cerr << "worrysome instruction!!" << std::endl;
-                assert (false);
+            // control flow instructions should be considered for two cases:
+            // (1) correctness: do they jump to something relative (?)
+            // (2) performance: do they jump inside region (?) [ignoring]
+
+            stringstream assemblyInst;
+            if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL || isJmp(assem->getId())) {
+                // std::cerr << "worrysome instruction!!" << std::endl;
+
+                auto asmOps = assem->getAsmOperands();
+                assert (asmOps->getOpCount() == 1);
+                assert (asmOps->getOperands()[0].type == X86_OP_IMM);
+                auto dest = asmOps->getOperands()[0].imm;
+
+                if (dest >= lowAddr && dest < highAddr)
+                    posOpt++;
+
+                // relative cf needs to become a direct one.. there is NO relative cf in 32bit
+                assemblyInst << "\t\"movl $" << assem->getOpStr() << ", (cfPtr)\\n\"\n";
+                if (isCondJmp(assem->getId())) {
+                    assemblyInst << "\t\"" << assem->getMnemonic() << " " << cfTramp << "\\n\"";
+                }
+                else {
+                    assemblyInst << "\t\"" << assem->getMnemonic() << " *cfPtr\\n\"";
+                }
+            }
+            else {
+                assemblyInst << "\t\"" << assem->getMnemonic() << " " << assem->getOpStr() << "\\n\"\n";
             }
             stringstream label;
-            InstConfiguration *ic = new InstConfiguration;
             label << std::hex << "link" << i->getAddress();
 
+            InstConfiguration *ic = new InstConfiguration;
             ic->setLink(label.str());
             ic->setSharedObject(sharedObj);
-            ic->addBreakpoint(new Address("", "", i->getAddress()));
+            ic->setBreakpoint(new Address("", "", i->getAddress()));
             instructionMapping.push_back(ic);
+            fxn << buildLabel(label.str());
 
-            fxn << "\".global " << label.str() << "\\n\"\n\"" << label.str() << ":\\n\"\n" << std::dec;
+            auto toCall = buildInstBlock(i->getAddress(), outputFxn);
             std::copy(std::begin(toCall), std::end(toCall), std::ostream_iterator<std::string>(fxn, "\n"));
-            fxn << "\t\"" << assem->getMnemonic() << " " << assem->getOpStr() << "\\n\"\n";
+            fxn << assemblyInst.str();
         }
     }
 
     // final instruction
-    fxn << std::hex << "\t\"push 0x" << jmpTo << "\\n\"\n\t\"ret\\n\"";
+    char jmpToInst[64];
+
+    sprintf(jmpToInst, "\t\"movl $0x%x, (instEnd)\\n\"", jmpTo);
+    fxn << jmpToInst << "\n";
+
+    fxn << std::hex <<"\t\"jmp *instEnd\\n\"";
+
+    std::cerr << "the instrumented function looks like: "
+              << fxn.str() << std::endl;
     insts.push_back(fxn.str());
 }
 
@@ -350,7 +404,7 @@ void SteamdrillSO::write(string outFile) {
 
     std::ofstream out(outputFile, std::ios_base::app);
     for (auto str : insts) {
-        out << "asm(\n" << str << ");";
+        out << "asm(" << str << ");";
     }
 
     writeInstPoints(instructionMapping, outFile);
@@ -483,7 +537,6 @@ int main(int argc, char *argv[]) {
     args::Positional<string> tpoints(group, "tracepoints", "tracepoints");
     args::Positional<string> ipoints(group, "instpoints", "where to place the instrumentation points");
 
-    debug = args::get(verbose);
     try {
         parser.ParseCLI(argc, argv);
     }
@@ -501,6 +554,8 @@ int main(int argc, char *argv[]) {
         std::cerr << parser;
         return -1;
     }
+
+    debug = args::get(verbose);
 
     auto tps = Configuration::parseTPoints(args::get(tpoints));
     SteamdrillSO instrTPs(args::get(tracers));
@@ -535,10 +590,14 @@ int main(int argc, char *argv[]) {
                         ->getChildren()->getIterable()->getLast();
                 address_t jumpTo = lstInst->getAddress() + lstInst->getSize();
                 VERBOSE("jumpTo " << jumpTo << std::endl);
+                //foo->accept(&dump);
 
-                instrTPs.instrument(foo, jumpTo, tp.getOutputFunction(), tp.getSOFile());
+                instrTPs.instrument(foo, jumpTo, tp.getOutputFunction(), tp.getSOFile(),
+                                    r.first->getOffset(), r.second->getOffset());
             });
     }
     instrTPs.write(args::get(ipoints));
+
+    std::cerr << "posible optimizations? " << posOpt << std::endl;
     return 0;
 }
