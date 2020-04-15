@@ -106,23 +106,34 @@ class SteamdrillSO {
     std::string cfTramp;
     vector<InstConfiguration*> instructionMapping;
 
-    vector<string> buildInstBlock(uintptr_t origEip, string outputFxn);
+    vector<string> buildInstBlock(uintptr_t origEip, string outputFxn, string filterFxn);
 
     static inline string buildLabel(string lname);
   public:
+    vector<string> vars;
     vector<string> insts;
 
     SteamdrillSO(string filename);
 
-    void instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj,
-                    address_t lowAddr, address_t highaddr);
+    void instrument(Function *toInst, address_t jmpTo, string outputFxn, string filterFxn,
+                    string sharedObj, address_t lowAddr, address_t highaddr);
     void write(string outFile);
+
+    string addFilterVar(string filterName);
 };
 
 string SteamdrillSO::buildLabel(string lname) {
     stringstream label;
     label << "\".global " << lname << "\\n\"\n\"" << lname << ":\\n\"\n";
     return label.str();
+}
+
+string SteamdrillSO::addFilterVar(string filterName) {
+    stringstream newVar;
+    newVar << "\t\"" << filterName << "stat:\\n\""
+            << "\t\".long 0\\n\"";
+    vars.push_back(newVar.str());
+    return newVar.str();
 }
 
 SteamdrillSO::SteamdrillSO(string filename) {
@@ -242,7 +253,7 @@ void SteamdrillSO::createDataSection() {
 }
 */
 
-vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer) {
+vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer, string filterFxn) {
     std::vector<std::string> instrs;
     char eipInst[64];
 
@@ -254,7 +265,19 @@ vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer) {
     instrs.insert(std::begin(instrs), std::begin(pushInsts), std::end(pushInsts));
     instrs.push_back(eipInst);
     instrs.push_back("\t\"call tracerBegin\\n\"");
-    instrs.push_back("\t\"call " + tracer + "\\n\"");
+    if (!filterFxn.empty()) {
+        stringstream tracerEndLabel;
+        tracerEndLabel << "te" << std::hex << origEip;
+
+        instrs.push_back("\t\"call " + filterFxn + "\\n\"");
+        instrs.push_back("\t\"testl %eax, %eax\\n\"");
+        instrs.push_back("\t\"jz " + tracerEndLabel.str()+ "\\n\"");
+        instrs.push_back("\t\"call " + tracer + "\\n\"");
+        instrs.push_back("\"" + tracerEndLabel.str() + ":\\n\"");
+    }
+    else {
+        instrs.push_back("\t\"call " + tracer + "\\n\"");
+    }
     instrs.push_back("\t\"call tracerEnd\\n\"");
     instrs.insert(std::end(instrs), std::begin(popInsts), std::end(popInsts));
     return instrs;
@@ -331,12 +354,17 @@ inline bool isCondJmp(int opId) {
 }
 
 static int posOpt = 0;
-void SteamdrillSO::instrument(Function *toInst, address_t jmpTo, string outputFxn, string sharedObj,
+void SteamdrillSO::instrument(Function *toInst, address_t jmpTo,
+                              string outputFxn, string filterFxn,  string sharedObj,
                               address_t lowAddr, address_t highAddr) {
     stringstream fxn;
-
-    for (auto blkIter : CIter::children(toInst))
-    {
+    /*
+      string filterVar = ""
+    if (!filterFxn.empty()) {
+        fitlerVar = addFilterVar(filterFxn);
+    }
+    */
+    for (auto blkIter : CIter::children(toInst)) {
         auto b = blkIter->getChildren()->getIterable();
         for (size_t index = 0; index < b->getCount(); ++index) {
             Instruction *i = b->get(index);
@@ -380,7 +408,7 @@ void SteamdrillSO::instrument(Function *toInst, address_t jmpTo, string outputFx
             instructionMapping.push_back(ic);
             fxn << buildLabel(label.str());
 
-            auto toCall = buildInstBlock(i->getAddress(), outputFxn);
+            auto toCall = buildInstBlock(i->getAddress(), outputFxn, filterFxn);
             std::copy(std::begin(toCall), std::end(toCall), std::ostream_iterator<std::string>(fxn, "\n"));
             fxn << assemblyInst.str();
         }
@@ -403,49 +431,16 @@ void SteamdrillSO::write(string outFile) {
     // egalito.generate(outFile, false);
 
     std::ofstream out(outputFile, std::ios_base::app);
+    out << "asm(\".data\\n\"";
+    for (auto str : vars)
+        out << str;
+    out << ");\n";
+
     for (auto str : insts) {
-        out << "asm(" << str << ");";
+        out << "asm(\".text\\n\"" << str << ");\n";
     }
 
     writeInstPoints(instructionMapping, outFile);
-    /*
-    DisasmHandle handle(true);
-    auto fp  = fxnPointer::getInstance();
-    for (auto inst : insts) {
-        for (auto blkIter : CIter::children(inst.code)) {
-
-            auto b = blkIter->getChildren()->getIterable();
-            for (size_t index = 0; index < b->getCount(); ++index) {
-                Instruction *i = b->get(index);
-                Assembly *assem = i->getSemantic()->getAssembly().get();
-
-                std::cout << assem->getMnemonic()
-                          << " " << assem->getOpStr() << "\n";
-
-                // fixup the instructions...
-                if (assem->getId() == X86_INS_CALL ||
-                    assem->getId() == X86_INS_LCALL) {
-                    std::cerr << "CALL!!" << std::endl;
-                    auto index = assem->getAsmOperands()->getOperands()[0].mem.disp;
-                    auto fxnName = fp->getFxn(index);
-                    out << "extern " << fxnName << "\n"
-                        << "call " << fxnName << "\n";
-                }
-                else if (assem->getId() == X86_INS_JMP) {
-                    std::cout << "JUMP!!" << std::endl;
-
-                    out << assem->getMnemonic()
-                        << " " << assem->getOpStr() << "\n";
-                }
-                else {
-                    out << assem->getMnemonic()
-                        << " " << assem->getOpStr() << "\n";
-                }
-            }
-        }
-    }
-    */
-
 }
 
 Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
@@ -568,7 +563,7 @@ int main(int argc, char *argv[]) {
 
     for (auto tp : tps) {
         tp->forEachBreakpoint(
-            [&instrTPs](const RegionIter r, const TracerConfiguration tp) {
+            [&instrTPs](const RegionIter r, const TracerConfiguration &tp) {
 
                 ChunkDumper dump(true);
 
@@ -592,7 +587,13 @@ int main(int argc, char *argv[]) {
                 VERBOSE("jumpTo " << jumpTo << std::endl);
                 //foo->accept(&dump);
 
-                instrTPs.instrument(foo, jumpTo, tp.getOutputFunction(), tp.getSOFile(),
+                string outputFxn = tp.getOutputFunction(), filterFxn = "";
+                TracerConfiguration *filter = nullptr;
+                if ((filter = tp.getFilter())) {
+                    filterFxn = filter->getOutputFunction();
+                }
+
+                instrTPs.instrument(foo, jumpTo, outputFxn, filterFxn, tp.getSOFile(),
                                     r.first->getOffset(), r.second->getOffset());
             });
     }
