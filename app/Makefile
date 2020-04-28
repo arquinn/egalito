@@ -6,8 +6,10 @@ BOOST_PYTHON_LIB = boost_python3
 PYTHON_LIB = python3.6m
 PYTHON_INC_DIR = /usr/include/python3.6m
 
-CFLAGS      += -g -I ../src/
-CXXFLAGS    += -g -I ../src/
+SDEV=../../../../test
+
+CFLAGS      += -g -I ../src/  -I $(SDEV)
+CXXFLAGS    += -g -I ../src/ -I $(SDEV)
 CLDFLAGS    += -L ../src/$(BUILDDIR) -legalito \
 	-Wl,-rpath=$(abspath ../src/$(BUILDDIR)) \
 	-Wl,-rpath=$(abspath ../dep/capstone/install/lib)
@@ -206,7 +208,7 @@ $(PYSHELL): $(PYTHON_BINDING) python/shell.py
 	chmod +x $(BUILDDIR)pyshell
 
 $(STEAMDRILL_INST): $(STEAMDRILL_INST_OBJECTS)
-	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^  "../../../sledgehammer/config_structs/tracer_configuration.o" $(CLDFLAGS) -Wl,-rpath=$(abspath ../src) -lboost_regex -lboost_serialization
+	$(SHORT_LINK) $(CXXFLAGS) -o $@ $^  "../../../sledgehammer/config_structs/tracer_configuration.o" $(SDEV)/libutil.a $(CLDFLAGS) -Wl,-rpath=$(abspath ../src)  -lboost_serialization
 $(STEADMRILL_INST): ../src/$(BUILDDIR)libegalito.so
 
 

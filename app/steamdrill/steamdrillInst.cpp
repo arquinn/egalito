@@ -1,5 +1,10 @@
 #include <cstring>  // for std::strcmp
+
+extern "C" {
 #include <libgen.h>
+#include <dirent.h>
+#include "parse_mem_mappings_lib.h"
+}
 
 #include <fstream>
 #include <functional>
@@ -400,11 +405,10 @@ void SteamdrillSO::instrument(Function *toInst, address_t jmpTo,
             }
             stringstream label;
             label << std::hex << "link" << i->getAddress();
-
             InstConfiguration *ic = new InstConfiguration;
             ic->setLink(label.str());
             ic->setSharedObject(sharedObj);
-            ic->setBreakpoint(new Address("", "", i->getAddress()));
+            ic->setBreakpoint(new Address("", "", i->getAddress(), 0)); // pid is unused
             instructionMapping.push_back(ic);
             fxn << buildLabel(label.str());
 
@@ -462,7 +466,7 @@ Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
             address_t readAddress = it->getReadAddress() + it->convertVAToOffset(lowPC);
 
             size_t readSize = highPC - lowPC;
-            if (isBP) readSize = 6; //the max size of an instruction???
+            if (isBP) readSize = 20; //the max size of an instruction???
 
             cs_insn *insn;
             size_t count = cs_disasm(handle.raw(),
@@ -520,6 +524,39 @@ Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
     return nullptr;
 }
 
+void getMappings(string replay, vector<struct mem_mapping> &mem) {
+    VERBOSE("getMappings for " << replay << std::endl;);
+  struct dirent *ent;
+  DIR *dir = opendir(replay.c_str());
+  if (!dir) {
+    std::cerr << "cannot open " << replay << " " << strerror(errno) << std::endl;
+    assert (false);
+  }
+
+  while((ent = readdir(dir))) {
+    if (!strncmp(ent->d_name, "mem_mappings", 12)) {
+      char filename[PATH_MAX];
+      pid_t pid = 0;
+      struct mem_mapping mm;
+      int rc;
+
+      sprintf(filename, "%s/%s", replay.c_str(), ent->d_name);
+      sscanf(ent->d_name, "mem_mappings.%d", &pid);
+      auto *log = mem_mapping_open(filename);
+      assert (log);
+      while ((rc = mem_mapping_next(log, &mm)) > 0) {
+        if (mm.prot > 4) {
+          mem.push_back(mm);
+        }
+      }
+      mem_mapping_close(log);
+    }
+  }
+  assert (mem.size() > 0);
+  closedir(dir);
+}
+
+
 
 
 int main(int argc, char *argv[]) {
@@ -528,6 +565,7 @@ int main(int argc, char *argv[]) {
     args::Group group(parser, "Required Arguments", args::Group::Validators::All);
 
     args::Flag verbose(parser, "verbose", "log stuff", {'v', "verbose"});
+    args::Positional<string> replay(group, "replay", "the replay for this query");
     args::Positional<string> tracers(group, "tracers", "shared object of tracers");
     args::Positional<string> tpoints(group, "tracepoints", "tracepoints");
     args::Positional<string> ipoints(group, "instpoints", "where to place the instrumentation points");
@@ -561,18 +599,37 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    vector<struct mem_mapping> mem_maps;
+    getMappings(args::get(replay), mem_maps);
+    VERBOSE("found " << mem_maps.size() << " exec files" << std::endl);
+
     for (auto tp : tps) {
         tp->forEachBreakpoint(
-            [&instrTPs](const RegionIter r, const TracerConfiguration &tp) {
+            [&instrTPs, &mem_maps](const RegionIter r, const TracerConfiguration &tp) {
 
                 ChunkDumper dump(true);
 
                 std::stringstream bpName;
                 bpName << std::hex << tp.getOutputFunction() << "-" << r.first->getOffset();
+                VERBOSE("building instrumentaiton for " << bpName.str());
+                // get the mapping for this tracer: *note* continuous tracers don't work here (!)
+                struct mem_mapping *mapping = nullptr;
+                for (auto iter = mem_maps.begin(), end = mem_maps.end(); iter != end; ++iter) {
+                     if(iter->addr <= r.first->getOffset() &&
+                        iter->addr + iter->len >= r.second->getOffset())
+                         mapping = &*iter; // can you do this...???
+                }
+                assert (mapping);
+
+                VERBOSE(std::hex << "found mapping "
+                        << mapping->cache_name << " "
+                        << mapping->addr << "-"
+                        << mapping->addr + mapping->len);
 
                 auto foo = getInstRegion(r.first->getOffset(),
                                          r.second->getOffset(),
-                                         r.first->getLibrary());
+                                         mapping->cache_name);
+
                 foo->setName(bpName.str());
                 VERBOSE(std::hex
                           << "bp [" << r.first->getOffset()
