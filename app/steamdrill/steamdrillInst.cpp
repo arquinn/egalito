@@ -3,7 +3,6 @@
 extern "C" {
 #include <libgen.h>
 #include <dirent.h>
-#include "parse_mem_mappings_lib.h"
 }
 
 #include <fstream>
@@ -33,6 +32,9 @@ extern "C" {
 
 #include "address.hpp"
 #include "tracer_configuration.hpp"
+#include "replay_bin_info.hpp"
+#include "mem_object.hpp"
+
 
 // I could do this with the pass api, but not worth it given
 // no reuse for this code
@@ -156,107 +158,6 @@ SteamdrillSO::SteamdrillSO(string filename) {
     tramp << buildLabel(cfTramp) << "\t\"jmp *cfPtr\\n\"";
     insts.push_back(tramp.str());
 }
-/*
-void SteamdrillSO::initStandardInstBlock(string tracerSO) {
-    // auto map = new ElfMap(tracerSO.c_str());
-    // auto space = new ElfSpace(map, tracerSO.c_str(), tracerSO.c_str());
-    // space->findSymbolsAndRelocs();
-
-    // need to build this ourselves:
-    for (auto s : *space->getSymbolList()) {
-        vector<Instruction*> *vec = nullptr;
-        if (!strncmp(s->getName(), "tracer_push_registers", sizeof("tracer_push_registers"))) {
-            vec = &pushInsts;
-        }
-        else if (!strncmp(s->getName(), "tracer_pop_registers", sizeof("tracer_pop_registers"))) {
-            vec = &popInsts;
-        }
-        if (vec) {
-            Function *fxn = getInstRegion(s->getAddress(),
-                                          s->getAddress() + 0x1000,
-                                          space->getFullPath());
-            auto blk = *(CIter::children(fxn).begin());
-            for (auto inst : CIter::children(blk)) {
-                auto semantic = inst->getSemantic();
-                if (semantic->getAssembly()->getMnemonic() == "retl")
-                    break;
-
-                vec->push_back(inst);
-            }
-        }
-    }
-    free (map);
-    free (space);
-}
-
-Link *SteamdrillSO::addVariable(string name) {
-    if (!targets) {
-        createDataSection();
-    }
-    auto region = static_cast<DataRegion *>(targets->getParent());
-    auto offset = targets->getSize();
-
-    auto var = new GlobalVariable(name);
-    var->setPosition(new AbsolutePosition(targets->getAddress()+targets->getSize()));
-
-    char *symname = new char[var->getName().length() + 1];
-    std::strcpy(symname, var->getName().c_str());
-
-    auto nsymbol = new Symbol(var->getAddress(), 4, symname,
-                              Symbol::TYPE_OBJECT, Symbol::BIND_LOCAL, 0, 0); //do these params matter?
-    var->setSymbol(nsymbol);
-
-    targets->addGlobalVariable(var);
-
-    targets->setSize(targets->getSize() + 4);
-    region->setSize(region->getSize() + 4);
-
-    std::cout << "var " << var->getName() << " @ " << var->getAddress()
-              << " " << " link will be..? " << offset << " from " << targets->getName()
-              << std::endl;
-
-    return new DataOffsetLink(targets, offset, Link::SCOPE_INTERNAL_DATA);
-}
-
-
-#define DATA_REGION_ADDRESS 0x10000000
-#define DATA_REGION_NAME ("region-" #DATA_REGION_ADDRESS)
-#define DATA_SECTION_NAME ".ttargets"
-
-// #define DATA_NAMEREGION_ADDRESS 0x11000000
-// #define DATA_NAMEREGION_NAME ".ttargets.names"
-
-void SteamdrillSO::createDataSection() {
-    auto regionList = module->getDataRegionList();
-    auto region = new DataRegion(DATA_REGION_ADDRESS);
-    region->setPosition(new AbsolutePosition(DATA_REGION_ADDRESS));
-    regionList->getChildren()->add(region);
-    region->setParent(regionList);
-
-    targets = new DataSection();
-    targets->setName(DATA_SECTION_NAME);
-    targets->setAlignment(0x8);
-    targets->setPermissions(SHF_WRITE | SHF_ALLOC);
-    targets->setPosition(new AbsoluteOffsetPosition(targets, 0));
-    targets->setType(DataSection::TYPE_DATA);
-    region->getChildren()->add(targets);
-    targets->setParent(region);
-
-    auto nameRegion = new DataRegion(DATA_NAMEREGION_ADDRESS);
-    nameRegion->setPosition(new AbsolutePosition(DATA_NAMEREGION_ADDRESS));
-    regionList->getChildren()->add(nameRegion);
-    nameRegion->setParent(regionList);
-
-    names = new DataSection();
-    names->setName(DATA_NAMEREGION_NAME);
-    names->setAlignment(0x1);
-    names->setPermissions(SHF_ALLOC);
-    names->setPosition(new AbsoluteOffsetPosition(names, 0));
-    names->setType(DataSection::TYPE_DATA);
-    namesRegion->getChildren()->add(names);
-    names->setParent(nameRegion);
-}
-*/
 
 vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer, string filterFxn) {
     std::vector<std::string> instrs;
@@ -286,68 +187,6 @@ vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer, st
     instrs.push_back("\t\"call tracerEnd\\n\"");
     instrs.insert(std::end(instrs), std::begin(popInsts), std::end(popInsts));
     return instrs;
-
-    /*
-    auto call = new Instruction();
-    auto callSem = new ControlFlowInstruction(X86_INS_CALL, call, "\xff\x1d", "call", 4);
-    callSem->setLink(begin);
-    call->setSemantic(callSem);
-    instrs.push_back(call);
-
-    call = new Instruction();
-    callSem = new ControlFlowInstruction(X86_INS_CALL, call, "\xff\x1d", "call", 4);
-    callSem->setLink(tlink);
-    call->setSemantic(callSem);
-    instrs.push_back(call);
-
-    call = new Instruction();
-    callSem = new ControlFlowInstruction(X86_INS_CALL, call, "\xff\x1d", "call", 4);
-    callSem->setLink(end);
-    call->setSemantic(callSem);
-    instrs.push_back(call);
-
-    // building this shit from scratch
-        // create some relocs... hopefully??
-    // create the external symbol?
-    auto dynSym = module->getElfSpace()->getDynamicSymbolList();
-    size_t offset = dynSym->getCount();
-    Symbol *symbol = new Symbol(0, 0, "tracerBegin",
-                                Symbol::TYPE_FUNC, Symbol::BIND_GLOBAL,
-                                offset, 0);
-    dynSym->add(symbol, offset);
-
-
-    auto relocList = module->getElfSpace()->getRelocList();
-    auto section = relocList->getSection(".rel.dyn");
-    assert(section);
-
-    auto reloc = new Reloc(begin->getTargetAddress(), R_386_PC32, offset, symbol, 0);
-    if(!relocList->add(reloc)) {
-    }
-    else {
-        section->add(reloc);
-        }*/
-    /*
-    DisasmHandle handle(true);
-    auto fp = fxnPointer::getInstance();
-
-    vector<u_char> bytes = {0xff, 0x1d, GET_BYTES(fp->getBegin())};
-    auto before = DisassembleInstruction(handle).instruction(bytes);
-    instrs.push_back(before);
-
-    bytes = {0xff, 0x1d, GET_BYTES(fp->getIndex(tracer))};
-    auto call = DisassembleInstruction(handle).instruction(bytes);
-    instrs.push_back(call);
-
-    bytes = {0xff, 0x1d, GET_BYTES(fp->getEnd())};
-    auto after = DisassembleInstruction(handle).instruction(bytes);
-    instrs.push_back(after);
-    instrs.insert(std::end(instrs), std::begin(popInsts), std::end(popInsts));
-    return instrs;
-    */
-
-    // add relocations for each of these... hopefully?
-
 }
 
 inline bool isJmp(int opId) {
@@ -363,12 +202,6 @@ void SteamdrillSO::instrument(Function *toInst, address_t jmpTo,
                               string outputFxn, string filterFxn,  string sharedObj,
                               address_t lowAddr, address_t highAddr) {
     stringstream fxn;
-    /*
-      string filterVar = ""
-    if (!filterFxn.empty()) {
-        fitlerVar = addFilterVar(filterFxn);
-    }
-    */
     for (auto blkIter : CIter::children(toInst)) {
         auto b = blkIter->getChildren()->getIterable();
         for (size_t index = 0; index < b->getCount(); ++index) {
@@ -448,14 +281,20 @@ void SteamdrillSO::write(string outFile) {
 }
 
 Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
+    // I should fixup how ElfMap works here in order to use endbr instructions
+
     auto elf = new ElfMap(file.c_str());
     auto sectionVector = elf->getSectionList();
 
     bool isBP = highPC == lowPC + 1;
 
     for (auto it : sectionVector) {
+        VERBOSE("looking at section " << it->getName()
+                << " " << it->getVirtualAddress() << " " << it->getSize() << std::endl );
         if (lowPC >= it->getVirtualAddress() &&
             highPC <= it->getVirtualAddress() + it->getSize())  {
+
+            VERBOSE("in the rigt section" << std::endl);
 
             PositionFactory *positionFactory = PositionFactory::getInstance();
             DisasmHandle handle(true);
@@ -524,41 +363,6 @@ Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
     return nullptr;
 }
 
-void getMappings(string replay, vector<struct mem_mapping> &mem) {
-    VERBOSE("getMappings for " << replay << std::endl;);
-  struct dirent *ent;
-  DIR *dir = opendir(replay.c_str());
-  if (!dir) {
-    std::cerr << "cannot open " << replay << " " << strerror(errno) << std::endl;
-    assert (false);
-  }
-
-  while((ent = readdir(dir))) {
-    if (!strncmp(ent->d_name, "mem_mappings", 12)) {
-      char filename[PATH_MAX];
-      pid_t pid = 0;
-      struct mem_mapping mm;
-      int rc;
-
-      sprintf(filename, "%s/%s", replay.c_str(), ent->d_name);
-      sscanf(ent->d_name, "mem_mappings.%d", &pid);
-      auto *log = mem_mapping_open(filename);
-      assert (log);
-      while ((rc = mem_mapping_next(log, &mm)) > 0) {
-        if (mm.prot > 4) {
-          mem.push_back(mm);
-        }
-      }
-      mem_mapping_close(log);
-    }
-  }
-  assert (mem.size() > 0);
-  closedir(dir);
-}
-
-
-
-
 int main(int argc, char *argv[]) {
 
     args::ArgumentParser parser("Instrument for steamdril.", "ARQ");
@@ -599,44 +403,29 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    vector<struct mem_mapping> mem_maps;
-    getMappings(args::get(replay), mem_maps);
-    VERBOSE("found " << mem_maps.size() << " exec files" << std::endl);
-
+    ReplayBinInfo rbi(args::get(replay));
     for (auto tp : tps) {
         tp->forEachBreakpoint(
-            [&instrTPs, &mem_maps](const RegionIter r, const TracerConfiguration &tp) {
+            [&instrTPs, &rbi](const RegionIter r, const TracerConfiguration &tp) {
 
                 ChunkDumper dump(true);
-
                 std::stringstream bpName;
+
                 bpName << std::hex << tp.getOutputFunction() << "-" << r.first->getOffset();
-                VERBOSE("building instrumentaiton for " << bpName.str());
-                // get the mapping for this tracer: *note* continuous tracers don't work here (!)
-                struct mem_mapping *mapping = nullptr;
-                for (auto iter = mem_maps.begin(), end = mem_maps.end(); iter != end; ++iter) {
-                     if(iter->addr <= r.first->getOffset() &&
-                        iter->addr + iter->len >= r.second->getOffset())
-                         mapping = &*iter; // can you do this...???
-                }
-                assert (mapping);
+                VERBOSE("building instr for " << bpName.str() << std::endl);
 
-                VERBOSE(std::hex << "found mapping "
-                        << mapping->cache_name << " "
-                        << mapping->addr << "-"
-                        << mapping->addr + mapping->len);
+                auto mapping = rbi.getFile(r.first->getOffset());
+                assert (mapping != rbi.files.end());
 
-                auto foo = getInstRegion(r.first->getOffset(),
-                                         r.second->getOffset(),
-                                         mapping->cache_name);
+                VERBOSE(std::hex << "found mapping " << mapping->name << " "
+                        << mapping->start << "-" << mapping->end << std::endl);
 
+                auto foo = getInstRegion(r.first->getOffset(), r.second->getOffset(), mapping->name);
+                assert (foo);
+                
                 foo->setName(bpName.str());
-                VERBOSE(std::hex
-                          << "bp [" << r.first->getOffset()
-                          << "-"    << r.second->getOffset()
-                          << "] in " << r.first->getLibrary()
-                          << "found " << foo->getSize()
-                        << std::endl);
+                VERBOSE(std::hex << "bp [" << r.first->getOffset() << "-" << r.second->getOffset()
+                        << "] in " << r.first->getLibrary() << std::endl);
 
                 auto lstInst = foo->getChildren()->getIterable()->getLast()
                         ->getChildren()->getIterable()->getLast();
@@ -645,9 +434,8 @@ int main(int argc, char *argv[]) {
                 //foo->accept(&dump);
 
                 string outputFxn = tp.getOutputFunction(), filterFxn = "";
-                TracerConfiguration *filter = nullptr;
-                if ((filter = tp.getFilter())) {
-                    filterFxn = filter->getOutputFunction();
+                if (tp.getFilter()) {
+                    filterFxn = tp.getFilter()->getOutputFunction();
                 }
 
                 instrTPs.instrument(foo, jumpTo, outputFxn, filterFxn, tp.getSOFile(),

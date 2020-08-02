@@ -14,7 +14,7 @@ CLDFLAGS    += -L ../src/$(BUILDDIR) -legalito \
 	-Wl,-rpath=$(abspath ../src/$(BUILDDIR)) \
 	-Wl,-rpath=$(abspath ../dep/capstone/install/lib)
 
-DEPFLAGS   +=  -I "../../../sledgehammer/config_structs/"
+DEPFLAGS   +=  -I "../../../sledgehammer/config_structs/" -I "../../../utils/"
 #
 
 ELF_SOURCES             = $(wildcard elf/*.cpp)
