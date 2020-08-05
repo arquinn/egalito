@@ -104,7 +104,7 @@ unique_ptr<fxnPointer> fxnPointer::theInstance = nullptr;
 
 
 //forward decls
-Function* getInstRegion(address_t lowPC, address_t highPC, std::string file);
+Function* getInstRegion(address_t lowPC, address_t highPC, const MemObject &file);
 
 class SteamdrillSO {
   private:
@@ -280,19 +280,24 @@ void SteamdrillSO::write(string outFile) {
     writeInstPoints(instructionMapping, outFile);
 }
 
-Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
+Function* getInstRegion(address_t lowPC, address_t highPC, const MemObject &mapping) {
     // I should fixup how ElfMap works here in order to use endbr instructions
 
-    auto elf = new ElfMap(file.c_str());
+    auto elf = new ElfMap(mapping.name.c_str());
     auto sectionVector = elf->getSectionList();
+
+    uint64_t vaoffset = elf->isSharedLibrary() ?
+            mapping.start - (mapping.offset * 0x1000)
+            : 0; // figure out this garbagio
+
+    address_t lowVA = lowPC - vaoffset, highVA = highPC - vaoffset;
 
     bool isBP = highPC == lowPC + 1;
 
+
     for (auto it : sectionVector) {
-        VERBOSE("looking at section " << it->getName()
-                << " " << it->getVirtualAddress() << " " << it->getSize() << std::endl );
-        if (lowPC >= it->getVirtualAddress() &&
-            highPC <= it->getVirtualAddress() + it->getSize())  {
+        if (lowVA >= it->getVirtualAddress() &&
+            highVA <= it->getVirtualAddress() + it->getSize())  {
 
             VERBOSE("in the rigt section" << std::endl);
 
@@ -302,9 +307,9 @@ Function* getInstRegion(address_t lowPC, address_t highPC, std::string file) {
             foo->setPosition(positionFactory->makeAbsolutePosition(lowPC));
 
             // I don't think this always works (?)
-            address_t readAddress = it->getReadAddress() + it->convertVAToOffset(lowPC);
+            address_t readAddress = it->getReadAddress() + it->convertVAToOffset(lowVA);
 
-            size_t readSize = highPC - lowPC;
+            size_t readSize = highPC - lowVA;
             if (isBP) readSize = 20; //the max size of an instruction???
 
             cs_insn *insn;
@@ -420,9 +425,9 @@ int main(int argc, char *argv[]) {
                 VERBOSE(std::hex << "found mapping " << mapping->name << " "
                         << mapping->start << "-" << mapping->end << std::endl);
 
-                auto foo = getInstRegion(r.first->getOffset(), r.second->getOffset(), mapping->name);
+                auto foo = getInstRegion(r.first->getOffset(), r.second->getOffset(), *mapping);
                 assert (foo);
-                
+
                 foo->setName(bpName.str());
                 VERBOSE(std::hex << "bp [" << r.first->getOffset() << "-" << r.second->getOffset()
                         << "] in " << r.first->getLibrary() << std::endl);
