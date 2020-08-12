@@ -18,14 +18,14 @@ _start2:
     .cfi_startproc
     .cfi_undefined %eip
     push    %ebx                    /* keep alignment */
-    call    *egalito_callInit@got //gotpcrel(%eip)
+//call    *egalito_callInit@got //gotpcrel(%eip)
     pop     %ebx
 
-    mov     egalito_initial_stack@got, %eax //pltgotpcrel(%eip), %eax
+	//mov     egalito_initial_stack@got, %eax //pltgotpcrel(%eip), %eax
     mov     (%eax), %esp            /* restore %rsp */
     xor     %edx, %edx  /* clear for now since loader is static */
 
-    mov     egalito_entry@got, %ebx  // pcrel(%eip), %ebx
+	//mov     egalito_entry@got, %ebx  // pcrel(%eip), %ebx
     jmp     *(%ebx)
     hlt
     .cfi_endproc

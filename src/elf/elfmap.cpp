@@ -95,7 +95,6 @@ void ElfMap::makeSectionMap() {
     }
 
     ElfXX_Shdr *sheader = (ElfXX_Shdr *)(charmap + header->e_shoff);
-    //Elf64_Phdr *pheader = (Elf64_Phdr *)(charmap + header->e_phoff);
 
     this->shstrtab = charmap + sheader[header->e_shstrndx].sh_offset;
 
@@ -103,7 +102,6 @@ void ElfMap::makeSectionMap() {
         ElfXX_Shdr *s = &sheader[i];
         const char *name = shstrtab + s->sh_name;
         ElfSection *section = new ElfSection(i, name, s);
-        //std::cout << "section [" << name << "]\n";
 
         sectionMap[name] = section;
         sectionList.push_back(section);
@@ -252,5 +250,4 @@ bool ElfMap::isDynamic() const {
 
 bool ElfMap::hasRelocations() const {
     return !findSectionsByType(SHT_RELA).empty();
-    //return findSection(".rela.text") != nullptr;
 }

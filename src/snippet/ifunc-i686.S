@@ -9,7 +9,7 @@ ifunc_resolver:
     push    %esi
     push    %edi
     mov     0x40(%esp), %edi
-    call    *ifunc_select@got //pcrel(%eip)
+	// call    *ifunc_select@got //pcrel(%eip)
     pop     %edi
     pop     %esi
     pop     %edx

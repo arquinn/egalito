@@ -10,6 +10,8 @@ SDEV=../../../../test
 
 CFLAGS      += -g -I ../src/  -I $(SDEV)
 CXXFLAGS    += -g -I ../src/ -I $(SDEV)
+#CFLAGS      += -O3 -I ../src/  -I $(SDEV)
+#CXXFLAGS    += -O3 -I ../src/ -I $(SDEV)
 CLDFLAGS    += -L ../src/$(BUILDDIR) -legalito \
 	-Wl,-rpath=$(abspath ../src/$(BUILDDIR)) \
 	-Wl,-rpath=$(abspath ../dep/capstone/install/lib)

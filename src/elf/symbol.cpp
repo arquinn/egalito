@@ -136,7 +136,7 @@ Symbol *SymbolList::findSizeZero(SymbolList *list, const char *sym) {
 }
 
 static void fixFunctionTypes(SymbolList *list, ElfMap *elfMap) {
-#ifdef ARCH_X86_64
+#if defined(ARCH_X86_64) || defined(ARCH_I686)
     // this may not be correct for ARM; untested
     for(auto sym : *list) {
         if(sym->getType() == Symbol::TYPE_NOTYPE) {
@@ -398,8 +398,8 @@ SymbolList *SymbolList::buildAnySymbolList(ElfMap *elfMap,
         }
 
         Symbol *symbol = new Symbol(address, size, name, type, bind, j, shndx);
-        CLOG0(5, "%s symbol #%d, index %d, [%s] %lx, type %d\n", sectionName,
-            (int)list->symbolList.size(), j, name, address, type);
+        CLOG0(5, "%s symbol #%d, index %d, [%s] %lx, type %d %d\n", sectionName,
+              (int)list->symbolList.size(), j, name, address, type, Symbol::TYPE_FUNC);
         list->add(symbol, (size_t)j);
     }
 
