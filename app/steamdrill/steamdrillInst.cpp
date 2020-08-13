@@ -271,7 +271,7 @@ void SteamdrillSO::instrument(Function *func,
     for (auto blkIter : CIter::children(func)) {
         auto blkPos = blkIter->getPosition()->get();
         // are we done with blocks?
-        if (blkPos > highAddr) {
+        if (blkPos >= highAddr) {
             jmpLoc = blkPos;
             goto out;
         }
@@ -280,6 +280,7 @@ void SteamdrillSO::instrument(Function *func,
         instr = instr || (blkPos <= lowAddr && blkPos + blkIter->getSize() > lowAddr);
         if (instr) {
             bool useJump = blkIter->getSize() >= JMP_SIZE;
+            // this seems problematic
             if (useJump) {
                 stringstream label;
                 label << std::hex << "link" << blkIter->getAddress();
@@ -290,6 +291,10 @@ void SteamdrillSO::instrument(Function *func,
                 ic->setBreakpoint(new Address("", "", blkIter->getAddress(), 0)); // pid is unused
                 instructionMapping.push_back(ic);
                 fxn << buildLabel(label.str());
+            }
+            else {
+                cerr << "cannot use a jump for block from " << blkPos << "-" <<
+                        blkPos + blkIter->getSize() << std::endl;
             }
 
             for (auto i : CIter::children(blkIter)) {
@@ -329,6 +334,8 @@ void SteamdrillSO::instrument(Function *func,
                             }
                             // call instructions can leak, so patch them as push+jmp
                             else if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL) {
+                                // we're removing a cal instruction, tell the library that for the counters:
+                                assemblyInst << "\taddl $1, (extraCalls)\n";
                                 // return address is instruction locaiton + instruction length
                                 assemblyInst << "\tpush $0x" << std::hex << i->getAddress() + i->getSize() << "\n";
                                 assemblyInst << "\tjmp " << cfTramp << "\n";
@@ -404,24 +411,29 @@ Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
     auto nxtSym = sym;
     --sym;
 
-    address_t funcStart = (*sym)->getAddress(),
-            funcEnd = nxtSym == symEnd ?
+    address_t funcStartVA = (*sym)->getAddress(),
+            funcEndVA = nxtSym == symEnd ?
             (*sec)->getVirtualAddress() + (*sec)->getSize() : (*nxtSym)->getAddress();
 
+    address_t funcStart = funcStartVA + elf->vaoffset;
 
+
+
+    VERBOSE("within function: [" << funcStartVA << ", " << funcEndVA << ")");
     PositionFactory *positionFactory = PositionFactory::getInstance();
     DisasmHandle handle(true);
-    Function *foo = new Function(lowPC);
-    foo->setPosition(positionFactory->makeAbsolutePosition(lowPC));
+    ChunkDumper dump(true);
+    // how did this not fail me in the past??
+    Function *foo = new Function(funcStart);
+    foo->setPosition(positionFactory->makeAbsolutePosition(funcStart));
 
-    address_t readAddress = (*sec)->getReadAddress() + (*sec)->convertVAToOffset(lowVA);
+    address_t readAddress = (*sec)->getReadAddress() + (*sec)->convertVAToOffset(funcStartVA);
 
-
-    size_t readSize = funcEnd - funcStart + 1;
+    size_t readSize = funcEndVA - funcStartVA + 1;
     cs_insn *insn;
     size_t count = cs_disasm(handle.raw(),
                              (const uint8_t *) readAddress, readSize,
-                             lowPC, 0, &insn);
+                             funcStart, 0, &insn);
 
     Block *block = nullptr;
     bool split = true;
@@ -459,6 +471,8 @@ Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
 
         ChunkMutator(block, false).append(instr);
     }
+
+    //foo->accept(&dump);
 
     if(block->getSize() == 0) {
         delete block;
@@ -506,12 +520,12 @@ int main(int argc, char *argv[]) {
     auto tps = Configuration::parseTPoints(args::get(tpoints));
 
     SteamdrillSO instrTPs(args::get(tracers));
-    if (args::get(verbose)) {
+    /*    if (args::get(verbose)) {
         auto reg = GroupRegistry::getInstance();
         for (auto name : reg->getSettingNames()) {
             reg->applySetting(name, 11);
         }
-    }
+        }*/
 
     // need logic to combine potentially multiple regions and potentially multiple
     // TracerConfigurations.
