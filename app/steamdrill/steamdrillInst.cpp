@@ -8,6 +8,7 @@ extern "C" {
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,6 +42,7 @@ extern "C" {
 // no reuse for this code
 using std::function;
 using std::initializer_list;
+using std::list;
 using std::make_pair;
 using std::string;
 using std::stringstream;
@@ -61,6 +63,8 @@ bool debug;
 
 #define TBEGIN 0x1
 #define TEND 0x2
+
+
 
 class fxnPointer {
     uintptr_t nextFxn;
@@ -150,31 +154,55 @@ ElfObj* getElf(string s, uintptr_t start, uintptr_t offset ) {
     return it->second;
 }
 
+class InstCall {
+  public:
+    std::string outputFxn, filterFxn, soFile;
+    uintptr_t lowAddr, highAddr;
+};
 
-//forward decls
-Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf);
 
+class FunctionInst;
 class SteamdrillSO {
   private:
     vector<std::string> pushInsts, popInsts;
-    std::string outputFile;
+    std::ofstream assemb;
+
     std::string cfTramp;
     vector<InstConfiguration*> instructionMapping;
     std::unordered_set<string> tracerIsoBlocks;
 
-    vector<string> buildInstBlock(uintptr_t origEip, string outputFxn, string filterFxn);
+    vector<string> buildInstBlock(uintptr_t origEip, list<InstCall> activeCalls);
 
     static inline string buildLabel(string lname);
   public:
-    vector<string> vars;
-    vector<string> insts;
+    //vector<string> vars;
+    //vector<string> insts;
 
     SteamdrillSO(string filename);
+    ~SteamdrillSO();
 
-    void instrument(Function *toInst, string outputFxn, string filterFxn,
-                    string sharedObj, address_t lowAddr, address_t highaddr, const unordered_map<uintptr_t, string>);
-    void write(string outFile, string as);
+    void instrument(unique_ptr<FunctionInst>&, string sharedObj);
+        //Function* toInst, string outputFxn, string filterFxn,
+        //string sharedObj, address_t lowAddr, address_t highaddr, const unordered_map<uintptr_t, string>);
+    void writeIPoints(string instPoints);
+    string addInstConfiguration(uintptr_t address, bool useJump, string sharedObj);
 };
+
+
+class FunctionInst {
+  public:
+    unique_ptr<Function> function;
+    ElfObj *elf;
+    map<uintptr_t, InstCall> instRegions;
+    u_long lowAddr, highAddr;
+
+    bool contains(uintptr_t addr) { return addr >= lowAddr && addr <= highAddr;}
+    void addIR(InstCall tc) { instRegions.emplace(tc.lowAddr, tc);  }
+};
+
+
+//forward decls
+unique_ptr<FunctionInst> getFunction(address_t lowPC, address_t highPC, ElfObj *elf);
 
 string SteamdrillSO::buildLabel(string lname) {
     stringstream label;
@@ -183,50 +211,67 @@ string SteamdrillSO::buildLabel(string lname) {
 }
 
 
-SteamdrillSO::SteamdrillSO(string filename) {
-    outputFile = filename;
+SteamdrillSO::SteamdrillSO(string assemblyFile) {
     pushInsts = { "\tpusha", "\tpushf"};
     popInsts = {"\tpopf", "\tpopa"};
+    assemb.open(assemblyFile);
+    assemb << ".text\n";
 
     cfTramp = "cfJmpTramp";
     stringstream tramp;
     tramp << buildLabel(cfTramp) << "\tjmp *cfPtr\n";
-    insts.push_back(tramp.str());
+    assemb << tramp.str() << "\n";
 }
 
-vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, string tracer, string filterFxn) {
+SteamdrillSO::~SteamdrillSO() {
+    assemb.close(); // make sure this is flushed out when we donzo
+}
+
+
+vector<string> SteamdrillSO::buildInstBlock(uintptr_t origEip, list<InstCall> activeCalls) {
     std::vector<std::string> instrs;
     std::stringstream key;
     char eipInst[128];
 
-    key << tracer << "ISO" << filterFxn;
+    for (auto ac : activeCalls)
+        key << ac.outputFxn << "ISO" << ac.filterFxn;
+
     auto pair = tracerIsoBlocks.insert(key.str());
     if (pair.second) {
 
-        // build a tracerIsolationBlocks for this tracer + filterFxn combio
+        // build a tracerIsolationBlocks for this collection of activeCalls:
+
         assert(!pushInsts.empty() && !popInsts.empty());
-        stringstream isoBlkInstrs, tracerEndLabel;
+        uintptr_t next = 0;
+        stringstream isoBlkInstrs, nextLabel;
         auto label = buildLabel(key.str());
-        tracerEndLabel << "te" << key.str();
+        nextLabel << "te" << key.str();
 
         isoBlkInstrs << label;
         for (auto inst : pushInsts) isoBlkInstrs << inst << "\n";
         isoBlkInstrs << "\tcall tracerBegin\n";
-        if (!filterFxn.empty()) {
-            isoBlkInstrs << "\tcall " << filterFxn + "\n";
-            isoBlkInstrs << "\ttestl %eax, %eax\n";
-            isoBlkInstrs << "\tjz " << tracerEndLabel.str() <<  "\n";
-            isoBlkInstrs << "\tcall " << tracer << "\n";
-            isoBlkInstrs << tracerEndLabel.str() << ":\n";
+        for (auto ac : activeCalls) {
+
+            if (!ac.filterFxn.empty()) {
+                string endLabel = nextLabel.str() + to_string(next++);
+
+                isoBlkInstrs << "\tcall " << ac.filterFxn + "\n";
+                isoBlkInstrs << "\ttestl %eax, %eax\n";
+                isoBlkInstrs << "\tjz " << endLabel <<  "\n";
+                isoBlkInstrs << "\tcall " << ac.outputFxn << "\n";
+                isoBlkInstrs << endLabel << ":\n";
+            }
+            else {
+                isoBlkInstrs << "\tcall " + ac.outputFxn + "\n";
+            }
         }
-        else {
-            isoBlkInstrs << "\tcall " + tracer + "\n";
-        }
+
         isoBlkInstrs << "\tcall tracerEnd\n";
         for (auto inst : popInsts) isoBlkInstrs << inst << "\n";
 
         isoBlkInstrs << "\tret\n";
-        this->insts.push_back(isoBlkInstrs.str());
+        assemb << isoBlkInstrs.str() << "\n";
+        // this->insts.push_back(isoBlkInstrs.str());
     }
 
     // now build the instrumentation for just this guy:
@@ -257,46 +302,66 @@ inline bool isCondJmp(int opId) {
   //foo->accept(&dump);
   */
 
+std::string SteamdrillSO::addInstConfiguration(uintptr_t address, bool useJump, string sharedObj) {
+    stringstream label;
+    label << std::hex << "link" << address;
+    InstConfiguration *ic = new InstConfiguration;
+    ic->setJump(useJump);
+    ic->setLink(label.str());
+    ic->setSharedObject(sharedObj);
+    ic->setBreakpoint(new Address("", "", address, 0)); // pid is unused
+    instructionMapping.push_back(ic);
 
-// should really accept tuples of, <low_addr,highAddr, outputFxn, filterFxn>
-static int posOpt = 0;
-void SteamdrillSO::instrument(Function *func,
-                              string outputFxn, string filterFxn,  string sharedObj,
-                              address_t lowAddr, address_t highAddr, const unordered_map<uintptr_t, string> thunks) {
-    stringstream fxn;
-    bool instr = false;
-    address_t jmpLoc = 0;
+    //assert (label.str() != "link804c95b");
+    return buildLabel(label.str());
+}
 
-    // this basic structure won't work if we need to have multiple tps at the same address
-    for (auto blkIter : CIter::children(func)) {
+void SteamdrillSO::instrument(unique_ptr<FunctionInst> &fi, string sharedObj) {
+    // do nothing
+    std::list<InstCall> activeCalls;
+
+    auto irIter = fi->instRegions.begin(), irEnd = fi->instRegions.end();
+
+    for (auto blkIter : CIter::children(fi->function.get())) {
         auto blkPos = blkIter->getPosition()->get();
-        // are we done with blocks?
-        if (blkPos >= highAddr) {
-            jmpLoc = blkPos;
-            goto out;
-        }
 
-        // determine if this block should be instrumented
-        instr = instr || (blkPos <= lowAddr && blkPos + blkIter->getSize() > lowAddr);
-        if (instr) {
-            bool useJump = blkIter->getSize() >= JMP_SIZE;
-            // this seems problematic
-            if (useJump) {
-                stringstream label;
-                label << std::hex << "link" << blkIter->getAddress();
-                InstConfiguration *ic = new InstConfiguration;
-                ic->setJump(useJump);
-                ic->setLink(label.str());
-                ic->setSharedObject(sharedObj);
-                ic->setBreakpoint(new Address("", "", blkIter->getAddress(), 0)); // pid is unused
-                instructionMapping.push_back(ic);
-                fxn << buildLabel(label.str());
+        // first update irIter and activeCalls:
+        auto acIter = activeCalls.begin(), acEnd = activeCalls.end();
+        while (acIter != acEnd) {
+            if (blkPos >= acIter->highAddr) {
+                acIter = activeCalls.erase(acIter);
             }
             else {
-                cerr << "cannot use a jump for block from " << blkPos << "-" <<
-                        blkPos + blkIter->getSize() << std::endl;
+                ++acIter;
             }
+        }
+        std::cerr << "next inst at " << irIter->second.lowAddr << " " << irIter->second.highAddr << std::endl;;
+        for (; irIter != irEnd && blkPos >= irIter->second.highAddr; ++irIter) {}
 
+        // will we need to instrument this next block?
+        bool instr = !activeCalls.empty() ||
+                (irIter != irEnd && irIter->second.lowAddr >= blkPos && irIter->second.lowAddr <= blkPos + blkIter->getSize());
+
+        // we're done if we (1) not actively instrumenting and (2) done instrumenting
+        if (activeCalls.empty() && irIter == irEnd) {
+            std::cerr << "done instrumenting "
+                      << fi->lowAddr << ", " << fi->highAddr << " at "
+                      << blkPos << std::endl;
+
+            return;
+        }
+        else if (instr) {
+            stringstream fxn;
+            bool useJump = blkIter->getSize() >= JMP_SIZE;
+            if (useJump) {
+                string label =  addInstConfiguration(blkIter->getAddress(), useJump, sharedObj);
+                fxn << label;
+            }
+            // mo warnings -> mo problems
+            //else {
+                //cerr << "cannot use a jump for block " << std::hex << blkPos << "-" <<
+                //blkPos + blkIter->getSize() << std::endl;
+                    //}
             for (auto i : CIter::children(blkIter)) {
                 Assembly *assem = i->getSemantic()->getAssembly().get();
                 // control flow instructions should be considered for two cases:
@@ -305,45 +370,51 @@ void SteamdrillSO::instrument(Function *func,
 
                 stringstream assemblyInst;
                 if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL || isJmp(assem->getId())) {
-                    // std::cerr << "worrysome instruction!!" << std::endl;
-
                     auto asmOps = assem->getAsmOperands();
                     assert (asmOps->getOpCount() == 1);
                     if (asmOps->getOperands()[0].type == X86_OP_IMM) {
-                        auto dest = asmOps->getOperands()[0].imm;
-                        if (dest >= lowAddr && dest < highAddr)
-                            posOpt++;
+                        //auto dest = asmOps->getOperands()[0].imm;
+                        //if (dest >=  && dest < highAddr)
+                        //posOpt++; it's actualy very difficult to calculate this.
 
-                        uintptr_t addr = stoi(assem->getOpStr(), NULL, 16);
-                        auto thunkIt = thunks.find(addr);
-                        if (thunkIt != thunks.end()) {
-                            // we need to replace this methinks:
-                            assemblyInst << std::hex << "\tmovl $0x" << i->getAddress() + i->getSize()
-                                         << ", %" << thunkIt->second << "\n";
+                        //uintptr_t addr;
+                        //try {
+                        //addr = stoul(assem->getOpStr(), NULL, 16);
+                        //} catch (std::out_of_range) {
+                        //std::cerr << "oops, tried to stoi " << assem->getOpStr() << std::endl;
+                        //std::cerr << "assembly address: " << i->getAddress() << std::endl;
+                        //assert (false);
+                        //}
+                        // we shouldn't need this thunk thing because we fix the stack by changing
+                        // call instructions now.
+                        //auto thunkIt = fi->elf->thunks.find(addr);
+                        //if (thunkIt != fi->elf->thunks.end()) {
+                        //// we need to replace this methinks:
+                        //assemblyInst << std::hex << "\tmovl $0x" << i->getAddress() + i->getSize()
+                        //<< ", %" << thunkIt->second << "\n";
                             //assert (false);
-                        }
-                        else {
+                        //}
+                        //else {
                             // we put the destination into cfPtr so that we can call/jump.
                             // note, direct jumps must be relative (or to a label), which
                             // we cannot produce in this case.
-                            assemblyInst << "\tmovl $" << assem->getOpStr() << ", (cfPtr)\n";
+                        assemblyInst << "\tmovl $" << assem->getOpStr() << ", (cfPtr)\n";
 
-                            // there is no indirect conditional branches, so use a trampolene
-                            if (isCondJmp(assem->getId())) {
-                                assemblyInst << "\t" << assem->getMnemonic() << " " << cfTramp << "\n";
-                            }
-                            // call instructions can leak, so patch them as push+jmp
-                            else if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL) {
-                                // we're removing a cal instruction, tell the library that for the counters:
-                                assemblyInst << "\taddl $1, (extraCalls)\n";
-                                // return address is instruction locaiton + instruction length
-                                assemblyInst << "\tpush $0x" << std::hex << i->getAddress() + i->getSize() << "\n";
-                                assemblyInst << "\tjmp " << cfTramp << "\n";
-                            }
-                            // everything else is good as gravy
-                            else {
-                                assemblyInst << "\t" << assem->getMnemonic() << " *cfPtr\n";
-                            }
+                        // there is no indirect conditional branches, so use a trampolene
+                        if (isCondJmp(assem->getId())) {
+                            assemblyInst << "\t" << assem->getMnemonic() << " " << cfTramp << "\n";
+                        }
+                        // call instructions can leak, so patch them as push+jmp
+                        else if (assem->getId() == X86_INS_CALL || assem->getId() == X86_INS_LCALL) {
+                            // we're removing a cal instruction, tell the library that for the counters:
+                            assemblyInst << "\taddl $1, (extraCalls)\n";
+                            // return address is instruction locaiton + instruction length
+                            assemblyInst << "\tpush $0x" << std::hex << i->getAddress() + i->getSize() << "\n";
+                            assemblyInst << "\tjmp " << cfTramp << "\n";
+                        }
+                        // everything else is good as gravy
+                        else {
+                            assemblyInst << "\t" << assem->getMnemonic() << " *cfPtr\n";
                         }
                     }
                     else {
@@ -355,56 +426,57 @@ void SteamdrillSO::instrument(Function *func,
                     assemblyInst << "\t" << assem->getMnemonic() << " " << assem->getOpStr() << "\n";
                 }
 
-                if (i->getAddress() >= lowAddr && i->getAddress() < highAddr) {
-                    auto toCall = buildInstBlock(i->getAddress(), outputFxn, filterFxn);
+                auto acIter = activeCalls.begin(), acEnd = activeCalls.end();
+                while (acIter != acEnd) {
+                    if (i->getAddress() >= acIter->highAddr) {
+                        acIter = activeCalls.erase(acIter);
+                    }
+                    else {
+                        ++acIter;
+                    }
+                }
+
+                // update activeCalls for any newly minted things
+                for (; irIter != irEnd && i->getAddress() >= irIter->second.lowAddr; ++irIter) {
+                    activeCalls.push_back(irIter->second);
+                }
+
+                if (!activeCalls.empty()) {
+                    if (!useJump) {
+                        string label = addInstConfiguration(i->getAddress(), useJump, sharedObj);
+                        fxn << label;
+                    }
+
+                    auto toCall = buildInstBlock(i->getAddress(), activeCalls);
                     std::copy(std::begin(toCall), std::end(toCall), std::ostream_iterator<std::string>(fxn, "\n"));
                 }
                 fxn << assemblyInst.str();
             }
+            // now add a jump for this block to head to non-instrumentation land:
+            char jmpToInst[64];
+            sprintf(jmpToInst, "\tmovl $0x%x, (instEnd)\n", blkPos + blkIter->getSize());
+            fxn << jmpToInst;
+            fxn << std::hex <<"\tjmp *instEnd\n";
+            VERBOSE("the instrumented:  " << fxn.str() << std::endl);
+            assemb << fxn.str() << "\n";
         }
     }
-
-out:
-    // We know that a 'jump' instruction point cannot cross a block boundary, so we don't need
-    // to do anything special or different here. Except, we need to determine where we should jump to
-    //
-    // final instruction
-    char jmpToInst[64];
-    sprintf(jmpToInst, "\tmovl $0x%x, (instEnd)\n", jmpLoc);
-    fxn << jmpToInst;
-    fxn << std::hex <<"\tjmp *instEnd\n";
-
-    VERBOSE("the instrumented:  " << fxn.str() << std::endl);
-    insts.push_back(fxn.str());
 }
 
-void SteamdrillSO::write(string ipoints, string as) {
-    // egalito.generate(outFile, false);
-
-    std::ofstream out(as);
-    //out << "asm(\".data\\n\"";
-    out << ".data\n";
-    for (auto str : vars)
-        out << str;
-    //out << ");\n";
-
-    for (auto str : insts) {
-        //out << "asm(\".text\\n\"" << str << ");\n";
-        out << ".text\n" << str << "\n";
-    }
-
+void SteamdrillSO::writeIPoints(string ipoints) {
     writeInstPoints(instructionMapping, ipoints);
 }
 
-Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
+
+
+unique_ptr<FunctionInst> getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
     // bit kluncy at the end there
 
-    //
     address_t lowVA = lowPC - elf->vaoffset, highVA = highPC - elf->vaoffset;
     auto sec = elf->getSections(lowVA, highVA);
     auto funcs = elf->funcs;
 
-    // figure out what function this belongs to:
+    // figure out what function we're trying to build:
     auto sym = funcs->begin(), symEnd = funcs->end();
     for (;sym < symEnd && (*sym)->getAddress() <= lowVA; ++sym);
 
@@ -415,16 +487,18 @@ Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
             funcEndVA = nxtSym == symEnd ?
             (*sec)->getVirtualAddress() + (*sec)->getSize() : (*nxtSym)->getAddress();
 
-    address_t funcStart = funcStartVA + elf->vaoffset;
+    address_t funcStart = funcStartVA + elf->vaoffset,
+            funcEnd = funcEndVA + elf->vaoffset;
 
 
-
-    VERBOSE("within function: [" << funcStartVA << ", " << funcEndVA << ")");
+    VERBOSE("within function: " << (*sym)->getName() << 
+            " [" << std::hex << funcStartVA << ", " << funcEndVA << ")" << std::endl);
+    
     PositionFactory *positionFactory = PositionFactory::getInstance();
     DisasmHandle handle(true);
     ChunkDumper dump(true);
-    // how did this not fail me in the past??
-    Function *foo = new Function(funcStart);
+    auto foo = std::make_unique<Function>(funcStart);
+    auto fi = std::make_unique<FunctionInst>();
     foo->setPosition(positionFactory->makeAbsolutePosition(funcStart));
 
     address_t readAddress = (*sec)->getReadAddress() + (*sec)->convertVAToOffset(funcStartVA);
@@ -435,31 +509,60 @@ Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
                              (const uint8_t *) readAddress, readSize,
                              funcStart, 0, &insn);
 
-    Block *block = nullptr;
-    bool split = true;
+    // the only way to actually get the blocks is to iterate twice... unless
+    // egalito secretly supports 'splitting' blocks? not worth finding out I don't think:
+    unordered_set<uint64_t> blockStarts;
+    std::cerr << std::hex;
+    blockStarts.insert(insn[0].address);
+    for (size_t j = 1; j < count; ++j) {
+        auto ins = &insn[j];
+        if (cs_insn_group(handle.raw(), ins, X86_INS_ENDBR32)) {
+            // this is a landing pad for indirect CF
+            blockStarts.insert(ins->address);
+            //std::cerr << "add block b/c endbr " << ins->address << std::endl;
+        }
+        else if ( //cs_insn_group(handle.raw(), ins, X86_GRP_RET) ||
+                  cs_insn_group(handle.raw(), ins, X86_GRP_CALL)) {
+            // the next instruction after a call starts a block for us
+            // note: this isn't *actually* true, but our instrumenter relies on it
+            blockStarts.insert(ins->address + ins->size);
+            //std::cerr << "add block b/c call " << ins->address + ins->size << std::endl;
+        }
+        else if (cs_insn_group(handle.raw(), ins, X86_GRP_JUMP)) {
+            // we look to understand the target of the jump.
+            // note: if the target is indirect, then the ENDBR32 better take care of it for us
+            auto details = ins->detail->x86;
+            assert (details.op_count == 1);
+            if (details.operands[0].type == X86_OP_IMM) {
+                uintptr_t addr = details.operands[0].imm;
+                blockStarts.insert(addr);
+                //std::cerr << "add block b/c dest " << addr << std::endl;
+            }
+            // the next instruction after a jump is a new block (blocks are single exit)
+            blockStarts.insert(ins->address + ins->size);
+            //std::cerr << "add block b/c jmp " << ins->address + ins->size << std::endl;
+        }
+    }
+    //for (auto bs : blockStarts) {
+    //std::cerr << "\block at " << std::hex << bs << std::endl;
+    //}
 
+    //assert (false);
+
+    Block *block = nullptr;
+    auto bsEnd = blockStarts.end();
     // iterate through all instructions:
     for (size_t j = 0; j < count; ++j) {
         auto ins = &insn[j];
-        split = split || cs_insn_group(handle.raw(), ins, X86_INS_ENDBR32);
-        if (split) {
+        if (blockStarts.find(ins->address) != bsEnd) {
             if (block) {
-                ChunkMutator(foo, false).append(block);
+                ChunkMutator(foo.get(), false).append(block);
             }
             Block *nblock = new Block();
             nblock->setPosition(
                 positionFactory->makePosition(block, nblock, foo->getSize()));
             block = nblock;
         }
-        // check if this instruction ends the current basic block
-        // note: technically, Call instructions do not end groups.
-        // but, our instrumentation needs it to break a BB... because call's
-        // can otherwise leak some instrumentation state:
-        split = cs_insn_group(handle.raw(), ins, X86_GRP_JUMP) ||
-                cs_insn_group(handle.raw(), ins, X86_GRP_CALL) ||
-                cs_insn_group(handle.raw(), ins, X86_GRP_RET);
-
-
         auto instr = Disassemble::instruction(ins, handle, true);
         Chunk *prevChunk = nullptr;
         if(block->getChildren()->getIterable()->getCount() > 0) {
@@ -473,16 +576,26 @@ Function* getFunction(address_t lowPC, address_t highPC, ElfObj *elf) {
     }
 
     //foo->accept(&dump);
-
+    if (!block) {
+        std::cerr << "something looks seriously wrong "
+                  << lowPC << ", " << highPC << std::endl;
+        std::cerr << "va addrs: " << lowVA << ", " << highVA << std::endl;
+        std::cerr << "read stuffs " << readAddress << " " << readSize << std::endl;
+        assert (false);
+    }
     if(block->getSize() == 0) {
         delete block;
     }
     else if (block->getSize() > 0) {
-        ChunkMutator(foo, false).append(block);
+        ChunkMutator(foo.get(), false).append(block);
     }
-
     cs_free(insn, count);
-    return foo;
+
+    fi->function = std::move(foo);
+    fi->lowAddr = funcStart;
+    fi->highAddr = funcEnd;
+    fi->elf = elf;
+    return fi;
 }
 
 int main(int argc, char *argv[]) {
@@ -519,7 +632,7 @@ int main(int argc, char *argv[]) {
 
     auto tps = Configuration::parseTPoints(args::get(tpoints));
 
-    SteamdrillSO instrTPs(args::get(tracers));
+    SteamdrillSO instrTPs(args::get(as));
     /*    if (args::get(verbose)) {
         auto reg = GroupRegistry::getInstance();
         for (auto name : reg->getSettingNames()) {
@@ -529,8 +642,46 @@ int main(int argc, char *argv[]) {
 
     // need logic to combine potentially multiple regions and potentially multiple
     // TracerConfigurations.
+    map<uintptr_t, InstCall> instRegions;
     ReplayBinInfo rbi(args::get(replay));
+    // duplicates and orders the instrumentation that we need to accomplish:
     for (auto tp : tps) {
+        if (tp->getOutputFunction() != "UNUSED") {
+            tp->forEachBreakpoint(
+                [&instrTPs, &rbi, &instRegions](const RegionIter r, const TracerConfiguration &tp) {
+                    InstCall ic;
+                    ic.outputFxn = tp.getOutputFunction();
+                    ic.filterFxn = tp.getFilter() != nullptr ? tp.getFilter()->getOutputFunction() : "";
+                    ic.soFile = tp.getSOFile();
+                    ic.lowAddr = r.first->getOffset();
+                    ic.highAddr = r.second->getOffset();
+                    instRegions.emplace(r.first->getOffset(), ic);
+                });
+        }
+    }
+
+    // now split the instRegions into chunks based on what function they're analyzing:
+    std::vector<unique_ptr<FunctionInst>> funcs;
+
+    for (auto &irPair : instRegions) {
+        // this assumes all tp regions are contained in a single symbol range
+        if (funcs.begin() == funcs.end() || !funcs.back()->contains(irPair.first)) {
+            auto mapping = rbi.getFile(irPair.first);
+            assert (mapping != rbi.files.end());
+            VERBOSE("mapping " << mapping->name << " at " << mapping->start << " " << mapping->offset << std::endl;);
+            auto elf = getElf(mapping->name, mapping->start, mapping->offset);
+            funcs.push_back(getFunction(irPair.second.lowAddr, irPair.second.highAddr,  elf));
+        }
+        funcs.back()->addIR(irPair.second);
+    }
+
+    // now instrument each region:
+    for (auto &func : funcs) {
+        instrTPs.instrument(func, args::get(tracers));
+    }
+
+    /*
+          for (auto tp : tps) {
         if (tp->getOutputFunction() != "UNUSED") {
             tp->forEachBreakpoint(
                 [&instrTPs, &rbi](const RegionIter r, const TracerConfiguration &tp) {
@@ -542,10 +693,11 @@ int main(int argc, char *argv[]) {
 
                     auto mapping = rbi.getFile(r.first->getOffset());
                     assert (mapping != rbi.files.end());
+                    auto elf = getElf(mapping->name, mapping->start, mapping->offset);
 
                     VERBOSE(std::hex << "found mapping " << mapping->name << " "
                             << mapping->start << "-" << mapping->end << std::endl);
-                    auto elf = getElf(mapping->name, mapping->start, mapping->offset);
+
 
                     auto foo  = getFunction(r.first->getOffset(), r.second->getOffset(), elf);
                     assert (foo);
@@ -559,13 +711,14 @@ int main(int argc, char *argv[]) {
                         filterFxn = tp.getFilter()->getOutputFunction();
                     }
 
-                    instrTPs.instrument(foo, outputFxn, filterFxn, tp.getSOFile(),
+                    instrTPs.instrument(foo.get(), outputFxn, filterFxn, tp.getSOFile(),
                                         r.first->getOffset(), r.second->getOffset(), elf->thunks);
                 });
         }
-    }
-    instrTPs.write(args::get(ipoints), args::get(as));
+    */
+    //assert (false);
+    instrTPs.writeIPoints(args::get(ipoints));
+    //std::cerr << "posible optimizations? " << posOpt << std::endl;
 
-    std::cerr << "posible optimizations? " << posOpt << std::endl;
     return 0;
 }
