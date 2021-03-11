@@ -181,11 +181,11 @@ class SteamdrillSO {
     SteamdrillSO(string filename);
     ~SteamdrillSO();
 
-    void instrument(unique_ptr<FunctionInst>&, string sharedObj);
+    void instrument(unique_ptr<FunctionInst>&);
         //Function* toInst, string outputFxn, string filterFxn,
         //string sharedObj, address_t lowAddr, address_t highaddr, const unordered_map<uintptr_t, string>);
     void writeIPoints(string instPoints);
-    string addInstConfiguration(uintptr_t address, bool useJump, string sharedObj);
+    string addInstConfiguration(uintptr_t address, bool useJump);
 };
 
 
@@ -302,13 +302,12 @@ inline bool isCondJmp(int opId) {
   //foo->accept(&dump);
   */
 
-std::string SteamdrillSO::addInstConfiguration(uintptr_t address, bool useJump, string sharedObj) {
+std::string SteamdrillSO::addInstConfiguration(uintptr_t address, bool useJump) {
     stringstream label;
     label << std::hex << "link" << address;
     InstConfiguration *ic = new InstConfiguration;
     ic->setJump(useJump);
     ic->setLink(label.str());
-    ic->setSharedObject(sharedObj);
     ic->setBreakpoint(new Address("", "", address, 0)); // pid is unused
     instructionMapping.push_back(ic);
 
@@ -316,7 +315,7 @@ std::string SteamdrillSO::addInstConfiguration(uintptr_t address, bool useJump, 
     return buildLabel(label.str());
 }
 
-void SteamdrillSO::instrument(unique_ptr<FunctionInst> &fi, string sharedObj) {
+void SteamdrillSO::instrument(unique_ptr<FunctionInst> &fi) {
     // do nothing
     std::list<InstCall> activeCalls;
 
@@ -354,7 +353,7 @@ void SteamdrillSO::instrument(unique_ptr<FunctionInst> &fi, string sharedObj) {
             stringstream fxn;
             bool useJump = blkIter->getSize() >= JMP_SIZE;
             if (useJump) {
-                string label =  addInstConfiguration(blkIter->getAddress(), useJump, sharedObj);
+                string label =  addInstConfiguration(blkIter->getAddress(), useJump);
                 fxn << label;
             }
             // mo warnings -> mo problems
@@ -443,7 +442,7 @@ void SteamdrillSO::instrument(unique_ptr<FunctionInst> &fi, string sharedObj) {
 
                 if (!activeCalls.empty()) {
                     if (!useJump) {
-                        string label = addInstConfiguration(i->getAddress(), useJump, sharedObj);
+                        string label = addInstConfiguration(i->getAddress(), useJump);
                         fxn << label;
                     }
 
@@ -605,7 +604,6 @@ int main(int argc, char *argv[]) {
 
     args::Flag verbose(parser, "verbose", "log stuff", {'v', "verbose"});
     args::Positional<string> replay(group, "replay", "the replay for this query");
-    args::Positional<string> tracers(group, "tracers", "shared object of tracers");
     args::Positional<string> tpoints(group, "tracepoints", "tracepoints");
     args::Positional<string> ipoints(group, "instpoints", "where to place the instrumentation points");
     args::Positional<string> as(group, "asout", "where to place the assembly");
@@ -652,7 +650,6 @@ int main(int argc, char *argv[]) {
                     InstCall ic;
                     ic.outputFxn = tp.getOutputFunction();
                     ic.filterFxn = tp.getFilter() != nullptr ? tp.getFilter()->getOutputFunction() : "";
-                    ic.soFile = tp.getSOFile();
                     ic.lowAddr = r.first->getOffset();
                     ic.highAddr = r.second->getOffset();
                     instRegions.emplace(r.first->getOffset(), ic);
@@ -677,7 +674,7 @@ int main(int argc, char *argv[]) {
 
     // now instrument each region:
     for (auto &func : funcs) {
-        instrTPs.instrument(func, args::get(tracers));
+        instrTPs.instrument(func);
     }
 
     /*
